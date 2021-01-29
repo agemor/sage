@@ -3,6 +3,10 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
+use std::ops;
+
+use crate::op;
+
 
 pub trait Op {
     fn compute(&self, x: &[f32]) -> f32;
@@ -87,6 +91,26 @@ pub struct OpNode {
     output: Weak<RefCell<VarNode>>,
 }
 
+impl Eq for OpNode {}
+
+impl PartialEq for OpNode {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
+impl Ord for OpNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.rank.cmp(&other.rank)
+    }
+}
+
+impl PartialOrd for OpNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Default)]
 pub struct VarNode {
     data: Option<f32>,
@@ -148,22 +172,24 @@ impl Hash for Var {
     }
 }
 
-impl Eq for OpNode {}
 
-impl PartialEq for OpNode {
-    fn eq(&self, _other: &Self) -> bool {
-        false
+// bunch of operator loadings...
+
+impl ops::Add<&Var> for &Var {
+    type Output = Var;
+
+    fn add(self, rhs: &Var) -> Var {
+        op::add(self, rhs)
     }
 }
 
-impl Ord for OpNode {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.rank.cmp(&other.rank)
+impl ops::Add<&Var> for &Var {
+    type Output = Var;
+
+    fn add(self, rhs: &Var) -> Var {
+        op::add(self, rhs)
     }
 }
 
-impl PartialOrd for OpNode {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
+
+
