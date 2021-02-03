@@ -1,12 +1,11 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet, BTreeSet};
 use std::hash::{Hash, Hasher};
-use std::rc::{Rc, Weak};
 use std::ops;
+use std::rc::{Rc, Weak};
 
 use crate::op;
-
 
 pub trait Op {
     fn compute(&self, x: &[f32]) -> f32;
@@ -41,7 +40,7 @@ pub fn diff(y: &Var, xs: &[&Var]) -> Vec<Var> {
     let mut queue = BinaryHeap::new();
     let mut d_map: HashMap<&Var, Var> = HashMap::new();
 
-    // The 'genesis' gy/gy (which is always 1)
+    // The 'genesis' gy/gy
     d_map.insert(y, Var::new(1.0));
 
     // Add to the queue!
@@ -69,18 +68,174 @@ pub fn diff(y: &Var, xs: &[&Var]) -> Vec<Var> {
             match d_map.get(x) {
                 None => d_map.insert(x, gx),
 
-                // gradients are accumulated
+                // gradients are accumulated TODO: memory really freed?
                 Some(p_gx) => d_map.insert(x, p_gx + gx),
             };
         }
     }
 
-    // aggregate outputs
+    // aggregate outputs.. magic happens here
     d_map.retain(|v, _| xs.contains(v));
 
-    // map to vector
-    d_map.into_iter().map(|(_, gx)| gx).collect()
+    // map to vector TODO: make same ordering!
+    d_map.into_iter().map(move |(_, gx)| gx).collect()
 }
+
+pub fn eval(xs: &[&Var]) {
+    // dependency counter
+
+    let mut actives: BTreeSet<Var> = BTreeSet::new();
+
+    // fill actives
+
+    let mut stack: Vec<Var> = Vec::new();
+
+    // increase counter of each x
+
+    // variables that have any dependencies... ok to drop now.
+    let zero_dep_clear = |x| {
+        // build deps set
+        let mut deps: HashSet<Var> = HashSet::new();
+
+        // get last unevaluated leaves
+
+        for x in xs.iter() {
+            let mut n_stack: Vec<Var> = vec![x.clone()];
+
+            while !n_stack.is_empty() {
+                let var = n_stack.pop().unwrap();
+                let node = var.node.borrow();
+
+                deps.insert(var);
+
+                // we don't care about the leaf nodes, since they are already stuffed with data.
+                if let Some(ref parent) = node.parent {
+                    // if evaluated, insert.
+                    // if not evaluated add to the deps and n_stack.
+                    for in_varn in parent.input.iter() {
+                        let in_var = Var::from_node(in_varn.clone());
+
+                        // this saves some redundant operations
+                        if !deps.contains(&in_var) {
+                            if let None = in_varn.borrow().data {
+                                n_stack.push(Var::from_node(in_varn.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        //
+        for acts in actives.iter() {
+
+            if !deps.contains(acts) {
+                // free acts
+                acts.node.borrow().free_data();
+
+                actives.remove(acts);
+            }
+
+            // do this until memory budget is met
+        }
+
+    };
+
+    //
+    let greedy_drop = |x| {
+
+        for acts in actives.iter() {
+
+            // free ones that have minimum T/M
+
+
+        }
+
+    };
+
+    // DPS
+    let mut oom = false;
+
+    while !stack.is_empty() {
+        let var = stack.last().unwrap();
+
+        let mut node = var.node.borrow_mut();
+
+        // if not evaluated...
+        if let None = node.data {
+            // it is very awkward to not have parents,,... with no data
+            if let Some(ref parent) = node.parent {
+                // if all evaluated... eval self and done.
+
+                let ready = parent
+                    .input
+                    .iter()
+                    .fold(true, |acc, x| match x.borrow().data {
+                        None => {
+                            stack.push(Var::from_node(x.clone()));
+                            false
+                        }
+                        Some(_) => acc,
+                    });
+
+                if ready {
+                    //err
+                    stack.pop();
+
+                    let in_args = parent
+                        .input
+                        .iter()
+                        .map(|x| x.borrow().data.unwrap())
+                        .collect();
+
+                    let out = parent.op.compute(&in_args);
+                    node.data = Some(out);
+
+                    // register actives
+                    actives.insert(var.clone());
+
+                    // if out of memory,
+                    if oom {}
+                }
+            }
+            // null leaf
+            else {
+                panic!("null leaf");
+            }
+        }
+    }
+
+    // memory budget M
+
+    // drop activations when exceeds memory budget
+
+    // first -> no dependencies (dropped when consumed)
+    // second -> \s
+
+    // M = model memory, optimizer memory, checkpoints (+outputs), peak buffer memory
+
+    // schedule checkpoints less than memory budgets..
+
+    // greedy activation drop
+
+    // greedy selection of node with max time_cost() / mem_cost()
+
+    // greedy tree evaluation
+
+    // calculate modules with larger memory requirements
+    //
+    //  children = [nodes...]
+    //  eval each children with less cp size
+    //
+}
+
+//
+// self memory hold + peak memory usage of children
+//
+fn mem_cost() {}
+
+fn time_cost() {}
+
 pub struct OpNode {
     op: Box<dyn Op>,
 
@@ -114,7 +269,8 @@ impl PartialOrd for OpNode {
 #[derive(Default)]
 pub struct VarNode {
     data: Option<f32>,
-    parent: Option<Rc<OpNode>>,
+
+    parent: Option<OpNode>,
 }
 
 impl VarNode {
@@ -124,6 +280,11 @@ impl VarNode {
             Some(n) => n.rank,
         }
     }
+
+    fn free_data(&mut self) {
+        self.data = None;
+    }
+
 }
 
 pub struct Var {
@@ -172,7 +333,6 @@ impl Hash for Var {
     }
 }
 
-
 // bunch of operator loadings...
 
 impl ops::Add<&Var> for &Var {
@@ -190,6 +350,3 @@ impl ops::Add<&Var> for &Var {
         op::add(self, rhs)
     }
 }
-
-
-
