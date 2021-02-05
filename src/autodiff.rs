@@ -1,14 +1,22 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet, BTreeSet};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::mem;
 use std::ops;
 use std::rc::{Rc, Weak};
+
+use std::time::{Duration, Instant};
+use ndarray;
 
 use crate::op;
 
 pub trait Op {
-    fn compute(&self, x: &[f32]) -> f32;
+    fn compute(&self, x: &[&Tensor]) -> Tensor;
+    fn mem_req(&self) -> usize {
+        mem::size_of::<f32>()
+    }
+
     // f(x) = u
     // f'(x) -> ∂u/∂x
     // f'(x) * gy = ∂u/∂x * ∂y/∂u = ∂y/∂x
@@ -22,16 +30,17 @@ pub fn op(op: Box<dyn Op>, x: &[&Var]) -> Var {
     let out_var_node = Rc::new(RefCell::new(VarNode {
         data: None,   // Not evaluated yet..!
         parent: None, // will be filled later
+        runtime: None,
     }));
 
-    let node = Rc::new(OpNode {
+    let node = OpNode {
         op,
         rank: in_ranks.iter().max().unwrap() + 1,
         input: in_nodes,
         output: Rc::downgrade(&out_var_node),
-    });
+    };
 
-    out_var_node.borrow_mut().parent = Some(node.clone());
+    out_var_node.borrow_mut().parent = Some(node);
 
     Var::from_node(out_var_node)
 }
@@ -69,7 +78,7 @@ pub fn diff(y: &Var, xs: &[&Var]) -> Vec<Var> {
                 None => d_map.insert(x, gx),
 
                 // gradients are accumulated TODO: memory really freed?
-                Some(p_gx) => d_map.insert(x, p_gx + gx),
+                Some(p_gx) => d_map.insert(x, op::add(p_gx, &gx)),
             };
         }
     }
@@ -82,7 +91,8 @@ pub fn diff(y: &Var, xs: &[&Var]) -> Vec<Var> {
 }
 
 pub fn eval(xs: &[&Var]) {
-    // dependency counter
+    // available memory at this moment
+    let mut mem_budget = 10000;
 
     let mut actives: BTreeSet<Var> = BTreeSet::new();
 
@@ -93,14 +103,14 @@ pub fn eval(xs: &[&Var]) {
     // increase counter of each x
 
     // variables that have any dependencies... ok to drop now.
-    let zero_dep_clear = |x| {
+    let zero_dep_clear = || {
         // build deps set
         let mut deps: HashSet<Var> = HashSet::new();
 
         // get last unevaluated leaves
 
         for x in xs.iter() {
-            let mut n_stack: Vec<Var> = vec![x.clone()];
+            let mut n_stack: Vec<Var> = vec![*x.clone()];
 
             while !n_stack.is_empty() {
                 let var = n_stack.pop().unwrap();
@@ -128,7 +138,6 @@ pub fn eval(xs: &[&Var]) {
 
         //
         for acts in actives.iter() {
-
             if !deps.contains(acts) {
                 // free acts
                 acts.node.borrow().free_data();
@@ -138,23 +147,41 @@ pub fn eval(xs: &[&Var]) {
 
             // do this until memory budget is met
         }
-
     };
 
     //
-    let greedy_drop = |x| {
 
-        for acts in actives.iter() {
+    let greedy_drop = |deps: &[&Var], mem_req: usize| {
+        // free ones that have minimum T/M
 
-            // free ones that have minimum T/M
+        // do not drop current dependencies & leaf
 
+        let mut mem_freed = 0;
 
+        while mem_freed < mem_req {
+            let m = actives
+                .iter()
+                .filter(|v| !deps.contains(v))
+                .min_by_key(|v| {
+                    let n = v.node.borrow();
+
+                    let mem_usage = n.runtime.unwrap().mem_store as f64;
+                    let rc_time = n.recompute_cost();
+
+                    rc_time.as_secs_f64() / mem_usage;
+                });
+
+            if let Some(v) = m {
+                v.node.borrow().free_data();
+
+                mem_freed += v.node.borrow().runtime.unwrap().mem_store;
+
+                actives.remove(v);
+            } else {
+                panic!("cannot free more!!");
+            }
         }
-
     };
-
-    // DPS
-    let mut oom = false;
 
     while !stack.is_empty() {
         let var = stack.last().unwrap();
@@ -182,20 +209,37 @@ pub fn eval(xs: &[&Var]) {
                     //err
                     stack.pop();
 
-                    let in_args = parent
+                    // exceeds mem budget?
+                    if parent.op.mem_req() > mem_budget {
+                        // clear out zero deps.
+                        zero_dep_clear();
+
+                        greedy_drop(parent.input, parent.op.mem_req());
+                    }
+
+                    let in_args: Vec<f32> = parent
                         .input
                         .iter()
                         .map(|x| x.borrow().data.unwrap())
                         .collect();
 
+                    // do some call time profiling
+                    let before = Instant::now();
+
                     let out = parent.op.compute(&in_args);
+                    let mem_store = mem::size_of_val(&out);
+
+                    let rt_profile = RuntimeProfile {
+                        mem_store,
+                        call_time: before.elapsed(),
+                    };
+
                     node.data = Some(out);
+                    node.runtime = Some(rt_profile);
 
                     // register actives
                     actives.insert(var.clone());
 
-                    // if out of memory,
-                    if oom {}
                 }
             }
             // null leaf
@@ -205,36 +249,9 @@ pub fn eval(xs: &[&Var]) {
         }
     }
 
-    // memory budget M
-
-    // drop activations when exceeds memory budget
-
-    // first -> no dependencies (dropped when consumed)
-    // second -> \s
-
-    // M = model memory, optimizer memory, checkpoints (+outputs), peak buffer memory
-
-    // schedule checkpoints less than memory budgets..
-
-    // greedy activation drop
-
-    // greedy selection of node with max time_cost() / mem_cost()
-
-    // greedy tree evaluation
-
-    // calculate modules with larger memory requirements
-    //
-    //  children = [nodes...]
-    //  eval each children with less cp size
-    //
 }
 
-//
-// self memory hold + peak memory usage of children
-//
-fn mem_cost() {}
 
-fn time_cost() {}
 
 pub struct OpNode {
     op: Box<dyn Op>,
@@ -266,12 +283,25 @@ impl PartialOrd for OpNode {
     }
 }
 
+struct RuntimeProfile {
+    mem_store: usize,
+
+    call_time: Duration,
+}
+
+
+pub type Tensor = ndarray::Array<f32, ndarray::IxDyn>;
+
 #[derive(Default)]
 pub struct VarNode {
-    data: Option<f32>,
+    data: Option<Tensor>,
 
     parent: Option<OpNode>,
+
+    // memory/time profile
+    runtime: Option<RuntimeProfile>,
 }
+
 
 impl VarNode {
     fn rank(&self) -> u32 {
@@ -281,10 +311,35 @@ impl VarNode {
         }
     }
 
+    fn recompute_cost(&self) -> Duration {
+        if let Some(ref n) = self.parent {
+            let mut stack = vec![n];
+            let mut time = self.runtime.unwrap().call_time;
+
+            while !stack.is_empty() {
+                let n = stack.pop().unwrap();
+
+                for x in n.input.iter() {
+                    let vn = x.borrow();
+                    if let Some(ref rt) = vn.runtime {
+                        if let None = vn.data {
+                            time += rt.call_time
+                        }
+                    } else {
+                        panic!("may yield inaccurate results!");
+                    }
+                }
+            }
+            time
+        } else {
+            // no parent -> cannot be recomputed
+            Duration::MAX
+        }
+    }
+
     fn free_data(&mut self) {
         self.data = None;
     }
-
 }
 
 pub struct Var {
@@ -292,11 +347,15 @@ pub struct Var {
 }
 
 impl Var {
-    pub fn new(data: f32) -> Var {
+    pub fn new(data: Tensor) -> Var {
         Var {
             node: Rc::new(RefCell::new(VarNode {
                 data: Some(data),
                 parent: None,
+                runtime: Some(RuntimeProfile {
+                    mem_store: mem::size_of_val(&data),
+                    call_time: Duration::ZERO,
+                }),
             })),
         }
     }
@@ -330,23 +389,5 @@ impl Clone for Var {
 impl Hash for Var {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.node.as_ptr().hash(state)
-    }
-}
-
-// bunch of operator loadings...
-
-impl ops::Add<&Var> for &Var {
-    type Output = Var;
-
-    fn add(self, rhs: &Var) -> Var {
-        op::add(self, rhs)
-    }
-}
-
-impl ops::Add<&Var> for &Var {
-    type Output = Var;
-
-    fn add(self, rhs: &Var) -> Var {
-        op::add(self, rhs)
     }
 }
