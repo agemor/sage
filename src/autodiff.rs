@@ -6,13 +6,23 @@ use std::mem;
 use std::ops;
 use std::rc::{Rc, Weak};
 
-use std::time::{Duration, Instant};
 use ndarray;
+use std::time::{Duration, Instant};
 
 use crate::op;
+use crate::tensor::{Shape, ShapeError, Tensor};
+use std::borrow::Borrow;
 
 pub trait Op {
     fn compute(&self, x: &[&Tensor]) -> Tensor;
+
+    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+        x.iter().try_fold(x[0].shape().clone(), |s, x| {
+            // try broadcasting
+            s.broadcast(x.shape())
+        })
+    }
+
     fn mem_req(&self) -> usize {
         mem::size_of::<f32>()
     }
@@ -20,7 +30,7 @@ pub trait Op {
     // f(x) = u
     // f'(x) -> ∂u/∂x
     // f'(x) * gy = ∂u/∂x * ∂y/∂u = ∂y/∂x
-    fn diff(&self, x: &[&Var], gy: &Var) -> Vec<Var>;
+    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var>;
 }
 
 pub fn op(op: Box<dyn Op>, x: &[&Var]) -> Var {
@@ -239,7 +249,6 @@ pub fn eval(xs: &[&Var]) {
 
                     // register actives
                     actives.insert(var.clone());
-
                 }
             }
             // null leaf
@@ -248,10 +257,7 @@ pub fn eval(xs: &[&Var]) {
             }
         }
     }
-
 }
-
-
 
 pub struct OpNode {
     op: Box<dyn Op>,
@@ -289,19 +295,14 @@ struct RuntimeProfile {
     call_time: Duration,
 }
 
-
-pub type Tensor = ndarray::Array<f32, ndarray::IxDyn>;
-
-#[derive(Default)]
 pub struct VarNode {
     data: Option<Tensor>,
-
+    shape: Shape,
     parent: Option<OpNode>,
 
     // memory/time profile
     runtime: Option<RuntimeProfile>,
 }
-
 
 impl VarNode {
     fn rank(&self) -> u32 {
@@ -351,6 +352,7 @@ impl Var {
         Var {
             node: Rc::new(RefCell::new(VarNode {
                 data: Some(data),
+                shape: data.shape.clone(),
                 parent: None,
                 runtime: Some(RuntimeProfile {
                     mem_store: mem::size_of_val(&data),
@@ -366,6 +368,10 @@ impl Var {
 
     fn data(&self) -> f32 {
         0.0
+    }
+
+    pub fn shape(&self) -> &Shape {
+        &RefCell::borrow(&self.node).shape
     }
 
     fn set_data(&self) {}
