@@ -1,82 +1,71 @@
-use std::fs;
-use std::io;
-use std::io::{Read, SeekFrom, Seek, Error};
+pub trait Dataset {
+    type Item;
 
-pub trait Dataset: IntoIterator {}
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> Option<Self::Item>;
+    fn iter(&self) -> Iter<Self::Item>;
+}
 
-pub struct DatasetIterator {}
+pub struct Iter<'a, T> {
+    dataset: &'a dyn Dataset<Item=T>,
+    index: usize,
+}
 
-impl Iterator for DatasetIterator {
-    type Item = ();
+impl<'a, T> Iter<'a, T> {
+    pub fn new(dataset: &'a impl Dataset<Item = T>) -> Self {
+        Iter { dataset, index: 0 }
+    }
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
-    }
-}
+        let index = self.index;
 
-pub struct Loader {}
-
-impl Loader {
-    pub fn new(dataset: Box<dyn Dataset>, batch_size: usize) -> Loader {
-        Loader {}
-    }
-}
-
-
-
-pub struct Mnist {
-    images: Vec<[u8; Mnist::IMAGE_SIZE]>,
-    labels: Vec<u8>,
-}
-
-impl Mnist {
-    const IMAGE_SIZE: usize = 28 * 28;
-
-    pub fn from_source(image_path: &str, label_path: &str) -> io::Result<Mnist> {
-        let images = Self::read_images(image_path)?;
-        let labels = Self::read_labels(label_path)?;
-
-        Ok(Mnist { images, labels })
-    }
-
-    fn read_images(path: &str) -> io::Result<Vec<[u8; Self::IMAGE_SIZE]>> {
-        let mut f = fs::File::open(path)?;
-
-        let mut buf_32: [u8; 4] = [0; 4];
-
-        f.seek(SeekFrom::Start(4))?;
-        f.read_exact(&mut buf_32)?;
-        f.seek(SeekFrom::Current(8))?;
-
-        let num_images = u32::from_be_bytes(buf_32);
-
-        let mut images: Vec<[u8; Self::IMAGE_SIZE]> = Vec::with_capacity(num_images as usize);
-        let mut buffer_image: [u8; Self::IMAGE_SIZE] = [0; Self::IMAGE_SIZE];
-
-        for _ in 0..num_images {
-            f.read_exact(&mut buffer_image)?;
-            images.push(buffer_image.clone());
+        if self.dataset.len() > index {
+            self.index += 1;
+            self.dataset.get(index)
+        } else {
+            None
         }
-        Ok(images)
-    }
-
-    fn read_labels(path: &str) -> io::Result<Vec<u8>> {
-        let mut f = fs::File::open(path)?;
-
-        let mut buf_8: [u8; 1] = [0; 1];
-        let mut buf_32: [u8; 4] = [0; 4];
-
-        f.seek(SeekFrom::Start(4))?;
-        f.read_exact(&mut buf_32)?;
-
-        let num_labels = u32::from_be_bytes(buf_32);
-
-        let mut labels: Vec<u8> = Vec::with_capacity(num_labels as usize);
-
-        for _ in 0..num_labels {
-            f.read_exact(&mut buf_8)?;
-            labels.push(buf_8[0]);
-        }
-        Ok(labels)
     }
 }
+
+impl<T> Iter<'_, T> {
+    pub fn batch<F>(self, size: usize, f: F) -> Batch<Self, F> {
+        Batch { iter: self, size, f }
+    }
+}
+
+
+pub struct Batch<I, F> {
+    iter: I,
+    size: usize,
+    f: F,
+}
+
+
+impl<I, F, B> Iterator for Batch<I, F> where
+    I: Iterator,
+    F: Fn(&[I::Item]) -> Option<B>,
+{
+    type Item = B;
+
+    fn next(&mut self) -> Option<B> {
+        let mut batch: Vec<I::Item> = Vec::with_capacity(self.size);
+
+        for _ in 0..self.size {
+            if let Some(item) = self.iter.next() {
+                batch.push(item);
+            }
+        }
+
+        if !batch.is_empty() {
+            (self.f)(&batch)
+        } else {
+            None
+        }
+    }
+}
+

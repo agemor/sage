@@ -5,6 +5,13 @@ pub struct Tensor {
     pub shape: Shape,
 }
 
+// make tensors from data
+
+// make empty tensors
+
+
+
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct Shape {
     pub dim: Vec<usize>,
