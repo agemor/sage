@@ -1,6 +1,8 @@
 use crate::autodiff::{op, Op, Var};
+use crate::tensor;
 use crate::tensor::{Shape, ShapeError, Tensor};
-use std::alloc::Global;
+use ndarray::Axis;
+use ndarray_stats::QuantileExt;
 use std::ops;
 use std::ops::Neg as Neg2;
 
@@ -26,7 +28,7 @@ struct Transpose;
 
 struct ReLU;
 struct Binarize {
-    threshold: usize,
+    threshold: f32,
 }
 
 struct Softmax {
@@ -88,7 +90,7 @@ impl Op for Sub {
 impl Op for Neg {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        -x
+        x.neg()
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -159,7 +161,7 @@ impl Op for Div {
 impl Op for Sum {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        x.sum(self.axis)
+        x.sum_axis(Axis(self.axis))
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -172,7 +174,7 @@ impl Op for Sum {
             d[self.axis] = 1;
             Ok(Shape::new(&d))
         } else {
-            Err(ShapeError)
+            Err(ShapeError::new("cannot sum on nonexistent axis"))
         }
     }
 
@@ -188,12 +190,12 @@ impl Op for SumTo {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
         let mut y: Tensor = x.clone();
-        let mut pad = vec![1, x.shape().len() - self.shape.len()];
-        pad.extend_from_slice(&self.shape);
+        let mut pad = vec![1, x.ndim() - self.shape.ndim()];
+        pad.extend_from_slice(&self.shape.dim);
 
         for (d, axis) in pad.iter().rev().enumerate() {
             if d == 1 {
-                y = y.sum_axis(ndarray::Axis(*axis))
+                y = y.sum_axis(Axis(*axis))
             }
         }
         y
@@ -211,7 +213,7 @@ impl Op for SumTo {
 
 impl Op for BroadcastTo {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
-        // This behavior is automatic
+        // TODO: shared tensor
         x[0].clone()
     }
 
@@ -230,64 +232,67 @@ impl Op for MatMul {
         let x0 = x[0];
         let x1 = x[1];
 
-        x0.dot(x1)
+        tensor::matmul(x0.view(), x1.view()).unwrap()
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
 
-        let d0 = &x0.shape().dim;
-        let d1 = &x1.shape().dim;
+        let x0_dim = &x0.shape().dim;
+        let x1_dim = &x1.shape().dim;
 
-        // (j, 1, n, m) * (k, m, p) = (j, k, n, p)
-        if d0.len() > 1 && d1.len() > 1 {
-            let (ld0, rd0) = d0.split_at(d0.len() - 1);
-            let (ld1, rd1) = d1.split_at(d1.len() - 2);
+        let x0_ndim = x0_dim.len();
+        let x1_ndim = x1_dim.len();
 
-            // m == m
-            if rd0[0] == rd1[0] {
-                let mut sld0 = Shape::new(ld0);
-                let mut sld1 = Shape::new(ld1);
-
-                // (k) -> (k, 1)
-                sld1.dim.push(1);
-
-                // (j, 1, n) and (k, 1) -> (j, k, n)
-                sld0.broadcast(&sld1);
-
-                // (j, k, n) -> (j, k, n, p)
-                sld0.dim.push(rd1[1]);
-
-                Ok(sld0)
-            } else {
-                Err(ShapeError)
-            }
-        } else {
-            Err(ShapeError)
+        if x0_ndim < 2 || x1_ndim < 2 {
+            return Err(ShapeError::new("invalid matrix"));
         }
+
+        if x0_dim[x0_ndim - 1] != x1_dim[x1_ndim - 2] {
+            return Err(ShapeError::new("incompatible matrix"));
+        }
+
+        let x0_bat_dim = &x0_dim[0..x0_ndim - 2];
+        let x1_bat_dim = &x1_dim[0..x1_ndim - 2];
+
+        // shape broadcast
+        let mut y_dim = tensor::broadcast(x0_bat_dim, x1_bat_dim)?;
+
+        // add matrix dim
+        y_dim.push(x0_dim[x0_ndim - 2]);
+        y_dim.push(x1_dim[x1_ndim - 1]);
+
+        Ok(Shape::new(&y_dim))
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
-        // (m)
+        // (*, A, B)
         let x0 = x[0];
 
-        // (m, k)
+        // (*, B, C)
         let x1 = x[1];
 
-        // (m, k) * (k, m)
+        // gy: (*, A, C)
+
+        // (*, A, B) = (*, A, C) (*, C, B)
         let gx0 = matmul(gy, &transpose(x1));
+
+        // (*, B, C) = (*, B, A) (*, A, C)
         let gx1 = matmul(&transpose(x0), gy);
 
         vec![gx0, gx1]
     }
 }
 
+// Swap last two components of tensor
 impl Op for Transpose {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
+        let mut y = x.clone();
 
-        x.transpose()
+        y.swap_axes(x.ndim() - 2, x.ndim() - 1);
+        y
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -299,7 +304,7 @@ impl Op for Transpose {
             d.swap(d.len() - 1, d.len() - 2);
             Ok(Shape::new(&d))
         } else {
-            Err(ShapeError)
+            Err(ShapeError::new("dim too short"))
         }
     }
 
@@ -313,8 +318,7 @@ impl Op for Transpose {
 impl Op for ReLU {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-
-        x.mapv(max)
+        x.mapv(|x| if x > 0.0 { x } else { 0.0 })
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -324,9 +328,7 @@ impl Op for ReLU {
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
         let x = x[0];
-
-        let gx = mul(gy, &binarize(x, 0));
-
+        let gx = mul(gy, &binarize(x, 0.0));
         vec![gx]
     }
 }
@@ -335,7 +337,7 @@ impl Op for Binarize {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
 
-        x.mapv(binarize, self.threshold)
+        x.mapv(|x| if x > self.threshold { 1.0 } else { 0.0 })
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -352,9 +354,10 @@ impl Op for Softmax {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
 
-        let y = x - x.max(self.axis);
-        let y = xp.exp(y);
-        y / y.sum(self.axis)
+        // for numerical stability
+        let mut y: Tensor = x - *x.max().unwrap();
+        y = y.mapv(|x| x.exp());
+        y / y.sum_axis(Axis(self.axis))
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -375,6 +378,15 @@ impl Op for Softmax {
 
 impl Op for SoftmaxCrossEntropy {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
+
+
+        N = x.shape[0]
+        log_z = utils.logsumexp(x, axis=1)
+        log_p = x - log_z
+        log_p = log_p[np.arange(N), t.ravel()]
+        y = -log_p.sum() / np.float32(N)
+        return y
+
         unimplemented!()
     }
 
@@ -383,6 +395,18 @@ impl Op for SoftmaxCrossEntropy {
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+
+        x, t = self.inputs
+        N, CLS_NUM = x.shape
+
+        gy *= 1/N
+        y = softmax(x)
+        # convert to one-hot
+        xp = cuda.get_array_module(t.data)
+        t_onehot = xp.eye(CLS_NUM, dtype=t.dtype)[t.data]
+        y = (y - t_onehot) * gy
+        return y
+
         unimplemented!()
     }
 }
@@ -456,7 +480,7 @@ pub fn relu(x: &Var) -> Var {
     op(Box::new(ReLU), &[x])
 }
 
-pub fn binarize(x: &Var, threshold: usize) -> Var {
+pub fn binarize(x: &Var, threshold: f32) -> Var {
     op(Box::new(Binarize { threshold }), &[x])
 }
 
