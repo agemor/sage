@@ -3,9 +3,44 @@ use ndarray::{IxDynImpl, OwnedRepr};
 use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 use std::cmp::max;
+use std::mem;
 
 pub type Tensor = ArrayD<f32>;
 pub type TensorView<'a> = ArrayViewD<'a, f32>;
+
+
+
+
+pub fn ones(shape:&Shape) -> Tensor {
+    Tensor::ones(IxDyn(&shape.dim))
+}
+
+pub fn mem_size(x:&Tensor) -> usize {
+    mem::size_of_val(x) + x.len() * mem::size_of::<f32>()
+}
+
+pub fn logsumexp(x: TensorView, axis: usize, keep_dims: bool) -> Tensor {
+    let mut shape = x.shape().to_vec();
+
+    if keep_dims {
+        shape[axis] = 1;
+    } else {
+        shape.remove(axis);
+    }
+
+    let max = (&x)
+        .fold_axis(Axis(axis), f32::MIN, move |&a, &b| if a > b { a } else { b })
+        .into_shape(IxDyn(&shape))
+        .unwrap();
+
+    let mut y: Tensor = &x - &max;
+    y.mapv_inplace(|x| x.exp());
+
+    let mut sum = y.sum_axis(Axis(axis)).into_shape(IxDyn(&shape)).unwrap();
+    sum.mapv_inplace(move |a| a.ln());
+    sum += &max;
+    sum
+}
 
 // (*, A, B) (*, B) -> (*, A)
 pub fn matvec(a: TensorView, b: TensorView) -> Result<Tensor, ShapeError> {

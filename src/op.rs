@@ -2,8 +2,7 @@ use crate::autodiff::{op, Op, Var};
 use crate::tensor;
 use crate::tensor::{Shape, ShapeError, Tensor};
 use ndarray::Axis;
-use ndarray_stats::QuantileExt;
-use std::ops;
+
 use std::ops::Neg as Neg2;
 
 struct Add;
@@ -98,7 +97,7 @@ impl Op for Neg {
         Ok(x.shape().clone())
     }
 
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+    fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
         let gx = neg(gy);
         vec![gx]
     }
@@ -201,11 +200,11 @@ impl Op for SumTo {
         y
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, _x: &[&Var]) -> Result<Shape, ShapeError> {
         Ok(self.shape.clone())
     }
 
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+    fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
         let gx = broadcast_to(gy, &self.shape);
         vec![gx]
     }
@@ -217,11 +216,11 @@ impl Op for BroadcastTo {
         x[0].clone()
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, _x: &[&Var]) -> Result<Shape, ShapeError> {
         Ok(self.shape.clone())
     }
 
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+    fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
         let gx = sum_to(gy, &self.shape);
         vec![gx]
     }
@@ -308,7 +307,7 @@ impl Op for Transpose {
         }
     }
 
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+    fn backward(&self, x: &[&Var], _gy: &Var) -> Vec<Var> {
         let x = x[0];
         let gx = transpose(x);
         vec![gx]
@@ -345,7 +344,7 @@ impl Op for Binarize {
         Ok(x.shape().clone())
     }
 
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+    fn backward(&self, _x: &[&Var], _gy: &Var) -> Vec<Var> {
         unimplemented!()
     }
 }
@@ -354,9 +353,18 @@ impl Op for Softmax {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
 
+        //let mut reduced_shape = x.shape().to_vec();
+        //reduced_shape[self.axis] = 1;
+
+        let max: &Tensor = &x.fold_axis(
+            Axis(self.axis),
+            f32::MIN,
+            move |&a, &b| if a > b { a } else { b },
+        );
+
         // for numerical stability
-        let mut y: Tensor = x - *x.max().unwrap();
-        y = y.mapv(|x| x.exp());
+        let mut y: Tensor = x - max;
+        y.mapv_inplace(|x| x.exp());
         y / y.sum_axis(Axis(self.axis))
     }
 
@@ -375,43 +383,42 @@ impl Op for Softmax {
         vec![gx]
     }
 }
-
+// (N, C) (N, C) -> (N)
 impl Op for SoftmaxCrossEntropy {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
+        let x0 = x[0];
+        let t = x[1];
 
-
-        N = x.shape[0]
-        log_z = utils.logsumexp(x, axis=1)
-        log_p = x - log_z
-        log_p = log_p[np.arange(N), t.ravel()]
-        y = -log_p.sum() / np.float32(N)
-        return y
-
-        unimplemented!()
+        let log_z = tensor::logsumexp(x0.view(), 1, true);
+        let log_p: Tensor = log_z * t;
+        log_p.sum_axis(Axis(1)).neg()
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
-        unimplemented!()
+        let x0 = x[0];
+        let x1 = x[1];
+
+        if x0.shape() != x1.shape() {
+            Err(ShapeError::new("shape does not match"))
+        } else {
+            Ok(x0.shape().clone())
+        }
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+        let x0 = x[0];
+        let t = x[1];
 
-        x, t = self.inputs
-        N, CLS_NUM = x.shape
+        let sm = softmax(x0, 1);
 
-        gy *= 1/N
-        y = softmax(x)
-        # convert to one-hot
-        xp = cuda.get_array_module(t.data)
-        t_onehot = xp.eye(CLS_NUM, dtype=t.dtype)[t.data]
-        y = (y - t_onehot) * gy
-        return y
+        let gx0 = mul(&sub(&sm, t), gy);
 
-        unimplemented!()
+        vec![gx0, t.clone()]
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub fn identity(x: &Var) -> Var {

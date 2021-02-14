@@ -60,8 +60,8 @@ pub struct Affine {
 impl Affine {
     pub fn new(input: usize, output: usize) -> Self {
         Affine {
-            kernel: Var::new(),
-            bias: Var::new(),
+            kernel: Var::from_tensor(),
+            bias: Var::from_tensor(),
         }
     }
 }

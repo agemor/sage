@@ -1,17 +1,14 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem;
-use std::ops;
 use std::rc::{Rc, Weak};
 
-use ndarray;
 use std::time::{Duration, Instant};
 
-use crate::op;
 use crate::tensor::{Shape, ShapeError, Tensor};
-use std::borrow::Borrow;
+use crate::{op, tensor};
 
 pub trait Op {
     fn compute(&self, x: &[&Tensor]) -> Tensor;
@@ -33,87 +30,73 @@ pub trait Op {
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var>;
 }
 
-pub fn op(op: Box<dyn Op>, x: &[&Var]) -> Var {
-    let in_nodes = x.iter().map(|x| x.node).collect();
-    let in_ranks: Vec<u32> = x.iter().map(|x| x.node.as_ref().borrow().rank()).collect();
+// Create a tensor operation
+pub fn op(op: Box<dyn Op>, args: &[&Var]) -> Var {
+    match op.forward(args) {
+        Ok(shape) => {
+            let out = Var::with_shape(shape.clone());
+            let op_node = OpNode::new(op, args, &out);
 
-    let out_var_node = Rc::new(RefCell::new(VarNode {
-        data: None,   // Not evaluated yet..!
-        parent: None, // will be filled later
-        runtime: None,
-    }));
-
-    let node = OpNode {
-        op,
-        rank: in_ranks.iter().max().unwrap() + 1,
-        input: in_nodes,
-        output: Rc::downgrade(&out_var_node),
-    };
-
-    out_var_node.borrow_mut().parent = Some(node);
-
-    Var::from_node(out_var_node)
+            out.node_mut().parent = Some(op_node);
+            out
+        }
+        Err(err) => {
+            panic!(err.msg)
+        }
+    }
 }
 
-pub fn diff(y: &Var, xs: &[&Var]) -> Vec<Var> {
-    let mut queue = BinaryHeap::new();
-    let mut d_map: HashMap<&Var, Var> = HashMap::new();
+// Differentiate variables
+pub fn diff<'a>(y: &'a Var, xs: &[&'a Var]) -> HashMap<&'a Var, Var> {
+    let mut queue = BinaryHeap::<&OpNode>::new();
+    let mut d_map = HashMap::<&Var, Var>::new();
 
-    // The 'genesis' gy/gy
-    d_map.insert(y, Var::new(1.0));
+    // The 'genesis' gy/gy, (which always equals to 1)
+    d_map.insert(y, Var::from_tensor(tensor::ones(y.shape())));
 
-    // Add to the queue!
-    if let Some(n) = &y.node.as_ref().borrow().parent {
-        queue.push(n.clone());
+    // Add first op_node to the queue!
+    if let Some(ref op_node) = y.node().parent {
+        queue.push(op_node);
     }
 
     while !queue.is_empty() {
         // must unwrap!!!
         let op_node = queue.pop().unwrap();
 
-        let out_var = Var::from_node(op_node.output.upgrade().unwrap());
-        let in_vars: Vec<Var> = op_node
-            .input
-            .iter()
-            .map(|vn| Var::from_node(vn.clone()))
-            .collect();
+        let x = op_node.input_vars();
+        let y = op_node.output_var().unwrap();
 
-        let in_var_ref = in_vars.iter().collect::<Vec<&Var>>();
-        let gy = d_map.get(&out_var).unwrap();
-        let new_gy = op_node.op.diff(&in_var_ref, gy);
+        let gy = d_map.get(&y).unwrap();
+        let gx = op_node.op.backward(&x.iter().collect::<Vec<&Var>>(), gy);
 
         // dispatch each gy with its op_node
-        for (x, gx) in in_vars.iter().zip(new_gy) {
+        for (x, gx) in x.iter().zip(gx) {
             match d_map.get(x) {
                 None => d_map.insert(x, gx),
 
                 // gradients are accumulated TODO: memory really freed?
-                Some(p_gx) => d_map.insert(x, op::add(p_gx, &gx)),
+                Some(gx_prev) => d_map.insert(x, op::add(gx_prev, &gx)),
             };
         }
     }
 
     // aggregate outputs.. magic happens here
     d_map.retain(|v, _| xs.contains(v));
-
-    // map to vector TODO: make same ordering!
-    d_map.into_iter().map(move |(_, gx)| gx).collect()
+    d_map
 }
 
+// Evaluate variables
 pub fn eval(xs: &[&Var]) {
     // available memory at this moment
     let mut mem_budget = 10000;
 
-    let mut actives: BTreeSet<Var> = BTreeSet::new();
-
-    // fill actives
+    let mut actives = HashSet::<Var>::new();
 
     let mut stack: Vec<Var> = Vec::new();
 
-    // increase counter of each x
-
     // variables that have any dependencies... ok to drop now.
-    let zero_dep_clear = || {
+    // collecting "garbage"
+    let clear_indep = || {
         // build deps set
         let mut deps: HashSet<Var> = HashSet::new();
 
@@ -124,21 +107,18 @@ pub fn eval(xs: &[&Var]) {
 
             while !n_stack.is_empty() {
                 let var = n_stack.pop().unwrap();
-                let node = var.node.borrow();
 
                 deps.insert(var);
 
                 // we don't care about the leaf nodes, since they are already stuffed with data.
-                if let Some(ref parent) = node.parent {
+                if let Some(ref parent) = var.node().parent {
                     // if evaluated, insert.
                     // if not evaluated add to the deps and n_stack.
-                    for in_varn in parent.input.iter() {
-                        let in_var = Var::from_node(in_varn.clone());
-
+                    for in_var in parent.input_vars().iter() {
                         // this saves some redundant operations
-                        if !deps.contains(&in_var) {
-                            if let None = in_varn.borrow().data {
-                                n_stack.push(Var::from_node(in_varn.clone()));
+                        if !deps.contains(in_var) {
+                            if let None = in_var.data() {
+                                n_stack.push(in_var.clone());
                             }
                         }
                     }
@@ -147,21 +127,18 @@ pub fn eval(xs: &[&Var]) {
         }
 
         //
-        for acts in actives.iter() {
-            if !deps.contains(acts) {
+        for var in actives.iter() {
+            if !deps.contains(var) {
                 // free acts
-                acts.node.borrow().free_data();
-
-                actives.remove(acts);
+                var.node().free_data();
+                actives.remove(var);
             }
-
-            // do this until memory budget is met
         }
     };
 
     //
 
-    let greedy_drop = |deps: &[&Var], mem_req: usize| {
+    let greedy_drop = |must_keep: &[Var], mem_req: usize| {
         // free ones that have minimum T/M
 
         // do not drop current dependencies & leaf
@@ -171,21 +148,20 @@ pub fn eval(xs: &[&Var]) {
         while mem_freed < mem_req {
             let m = actives
                 .iter()
-                .filter(|v| !deps.contains(v))
+                .filter(|v| !must_keep.contains(v)) // do not touch must_keep
                 .min_by_key(|v| {
-                    let n = v.node.borrow();
+                    let n = v.node();
 
-                    let mem_usage = n.runtime.unwrap().mem_store as f64;
-                    let rc_time = n.recompute_cost();
+                    let mem_cost = n.runtime.unwrap().mem_store as f64;
+                    let time_cost = n.recompute_cost().as_secs_f64();
 
-                    rc_time.as_secs_f64() / mem_usage;
+                    time_cost / mem_cost;
                 });
 
             if let Some(v) = m {
-                v.node.borrow().free_data();
+                v.node().free_data();
 
-                mem_freed += v.node.borrow().runtime.unwrap().mem_store;
-
+                mem_freed += v.node().runtime.unwrap().mem_store;
                 actives.remove(v);
             } else {
                 panic!("cannot free more!!");
@@ -194,9 +170,9 @@ pub fn eval(xs: &[&Var]) {
     };
 
     while !stack.is_empty() {
-        let var = stack.last().unwrap();
+        let var = { stack.last().unwrap() };
 
-        let mut node = var.node.borrow_mut();
+        let mut node = var.node_mut();
 
         // if not evaluated...
         if let None = node.data {
@@ -205,47 +181,51 @@ pub fn eval(xs: &[&Var]) {
                 // if all evaluated... eval self and done.
 
                 let ready = parent
-                    .input
-                    .iter()
-                    .fold(true, |acc, x| match x.borrow().data {
+                    .input_vars()
+                    .into_iter()
+                    .fold(true, |ready, x| match x.data() {
                         None => {
-                            stack.push(Var::from_node(x.clone()));
+                            stack.push(x);
                             false
                         }
-                        Some(_) => acc,
+                        Some(_) => ready,
                     });
 
                 if ready {
                     //err
                     stack.pop();
 
+                    let in_vars = parent.input_vars();
+
                     // exceeds mem budget?
                     if parent.op.mem_req() > mem_budget {
                         // clear out zero deps.
-                        zero_dep_clear();
+                        clear_indep();
 
-                        greedy_drop(parent.input, parent.op.mem_req());
+                        // only when necessary
+                        greedy_drop(&in_vars, parent.op.mem_req());
                     }
 
-                    let in_args: Vec<f32> = parent
-                        .input
-                        .iter()
-                        .map(|x| x.borrow().data.unwrap())
-                        .collect();
+                    let in_tensors = in_vars
+                        .into_iter()
+                        .map(|v| {
+                            // must unwrap (checked in 'ready' phase)
+                            v.data().unwrap()
+                        })
+                        .collect::<Vec<&Tensor>>();
 
-                    // do some call time profiling
-                    let before = Instant::now();
+                    // do some runtime profiling
+                    let timer = Instant::now();
 
-                    let out = parent.op.compute(&in_args);
-                    let mem_store = mem::size_of_val(&out);
+                    let out_tensor = parent.op.compute(&in_tensors);
 
-                    let rt_profile = RuntimeProfile {
-                        mem_store,
-                        call_time: before.elapsed(),
+                    let profile = RuntimeProfile {
+                        mem_store: tensor::mem_size(&out_tensor),
+                        call_time: timer.elapsed(),
                     };
 
-                    node.data = Some(out);
-                    node.runtime = Some(rt_profile);
+                    node.data = Some(out_tensor);
+                    node.runtime = Some(profile);
 
                     // register actives
                     actives.insert(var.clone());
@@ -263,10 +243,41 @@ pub struct OpNode {
     op: Box<dyn Op>,
 
     // Generation rank, required for topological ordering of computational nodes
-    rank: u32,
+    rank: usize,
 
     input: Vec<Rc<RefCell<VarNode>>>,
     output: Weak<RefCell<VarNode>>,
+}
+
+impl OpNode {
+    fn new(op: Box<dyn Op>, input: &[&Var], output: &Var) -> Self {
+        let rank = input
+            .into_iter()
+            .map(|a| a.node().rank()) // each rank
+            .max() // get max rank in parent gen
+            .unwrap()
+            + 1; // increase + 1
+
+        OpNode {
+            op,
+            rank,
+            input: input.iter().map(|e| e.node.clone()).collect(),
+            output: Rc::downgrade(&output.node),
+        }
+    }
+
+    fn input_vars(&self) -> Vec<Var> {
+        self.input
+            .iter()
+            .map(|e| Var::from_node(e.clone()))
+            .collect()
+    }
+
+    fn output_var(&self) -> Option<Var> {
+        self.output
+            .upgrade() // try upgrade
+            .map_or(None, |e| Some(Var::from_node(e.clone())))
+    }
 }
 
 impl Eq for OpNode {}
@@ -305,29 +316,45 @@ pub struct VarNode {
 }
 
 impl VarNode {
-    fn rank(&self) -> u32 {
+    fn rank(&self) -> usize {
         match &self.parent {
             None => 0,
             Some(n) => n.rank,
         }
     }
 
+    // get re-computation cost, in a dynamic-programming fashion.
     fn recompute_cost(&self) -> Duration {
         if let Some(ref n) = self.parent {
             let mut stack = vec![n];
-            let mut time = self.runtime.unwrap().call_time;
 
+            // must unwrap, as un-evaluated VarNodes are not in the actives set
+            let mut time = Duration::new(0, 0);
+
+            // start with self..
             while !stack.is_empty() {
-                let n = stack.pop().unwrap();
+                let op_node = stack.pop().unwrap();
 
-                for x in n.input.iter() {
-                    let vn = x.borrow();
-                    if let Some(ref rt) = vn.runtime {
-                        if let None = vn.data {
-                            time += rt.call_time
+                // overhead of op_node itself
+                let runtime = op_node
+                    .output_var()
+                    .unwrap() // must unwrap, as only op_nodes with outputs are in the stack
+                    .node()
+                    .runtime
+                    .unwrap(); // must unwrap, as un-evaluated VarNodes are not in the actives set
+
+                time += runtime.call_time;
+
+                for in_var in op_node.input_vars().iter() {
+                    // needs re-computation
+                    if let None = in_var.data() {
+                        if let Some(ref parent) = in_var.node().parent {
+                            stack.push(parent)
                         }
-                    } else {
-                        panic!("may yield inaccurate results!");
+                        // no parent and no data?? wtf?
+                        else {
+                            panic!("something gone wrong");
+                        }
                     }
                 }
             }
@@ -348,30 +375,52 @@ pub struct Var {
 }
 
 impl Var {
-    pub fn new(data: Tensor) -> Var {
+    fn with_shape(shape: Shape) -> Var {
         Var {
             node: Rc::new(RefCell::new(VarNode {
-                data: Some(data),
-                shape: data.shape.clone(),
+                data: None,
+                shape,
                 parent: None,
                 runtime: Some(RuntimeProfile {
-                    mem_store: mem::size_of_val(&data),
+                    mem_store: 0,
                     call_time: Duration::ZERO,
                 }),
             })),
         }
     }
 
+    pub fn from_tensor(data: Tensor) -> Var {
+        Var {
+            node: Rc::new(RefCell::new(VarNode {
+                data: Some(data),
+                shape: Shape::new(data.shape()),
+                parent: None,
+                runtime: Some(RuntimeProfile {
+                    mem_store: tensor::mem_size(&data),
+                    call_time: Duration::ZERO,
+                }),
+            })),
+        }
+    }
+
+    fn node(&self) -> &VarNode {
+        &RefCell::borrow(&self.node)
+    }
+
+    fn node_mut(&self) -> &mut VarNode {
+        &mut RefCell::borrow_mut(&self.node)
+    }
+
     fn from_node(node: Rc<RefCell<VarNode>>) -> Var {
         Var { node }
     }
 
-    fn data(&self) -> f32 {
-        0.0
+    fn data(&self) -> Option<&Tensor> {
+        self.node().data.map_or(None, |e| Some(&e))
     }
 
     pub fn shape(&self) -> &Shape {
-        &RefCell::borrow(&self.node).shape
+        &self.node().shape
     }
 
     fn set_data(&self) {}

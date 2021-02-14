@@ -49,7 +49,7 @@ fn main() {
 
 
         let logits = model.pass(&input);
-        let loss = op::softmax_cross_entropy(&logits, &label);
+        let loss = op::softmax_cross_entropy(&logits, &labels);
 
         let params = model.params().unwrap();
         let grads = diff(&loss, &params);
