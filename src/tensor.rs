@@ -1,21 +1,58 @@
 use ndarray::prelude::*;
-use ndarray::{IxDynImpl, OwnedRepr};
-use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::rand_distr::{Normal, Uniform};
 use ndarray_rand::RandomExt;
-use std::cmp::max;
 use std::mem;
 
 pub type Tensor = ArrayD<f32>;
 pub type TensorView<'a> = ArrayViewD<'a, f32>;
 
+fn fan_in_and_out(shape: &Shape) -> (usize, usize) {
+    if shape.ndim() < 2 {
+        panic!("cannot computed.. shape too small");
+    }
 
+    let num_in_fmaps = shape.dim[1];
+    let num_out_fmaps = shape.dim[0];
 
+    let mut receptive_field_size = 1;
 
-pub fn ones(shape:&Shape) -> Tensor {
+    if shape.ndim() > 2 {
+        receptive_field_size = shape.dim[2..].iter().fold(1, |a, b| a * (*b));
+    }
+
+    let fan_in = num_in_fmaps * receptive_field_size;
+    let fan_out = num_out_fmaps * receptive_field_size;
+
+    (fan_in, fan_out)
+}
+
+pub fn kaiming_uniform(shape: &Shape, gain: f32) -> Tensor {
+    let (fan_in, _) = fan_in_and_out(shape);
+    let std = gain * (1.0 / fan_in as f32).sqrt();
+    let a = 3.0_f32.sqrt() * std;
+
+    Tensor::random(IxDyn(&shape.dim), Uniform::new(-a, a))
+}
+
+pub fn kaiming_normal(shape: &Shape, gain: f32) -> Tensor {
+    let (fan_in, _) = fan_in_and_out(shape);
+    let std = gain * (1.0 / fan_in as f32).sqrt();
+    Tensor::random(IxDyn(&shape.dim), Normal::new(0.0, std).unwrap())
+}
+
+pub fn from_vec(shape: Shape, vec: Vec<f32>) -> Tensor {
+    Tensor::from_shape_vec(IxDyn(&shape.dim), vec).unwrap()
+}
+
+pub fn zeros(shape: Shape) -> Tensor {
+    Tensor::zeros(IxDyn(&shape.dim))
+}
+
+pub fn ones(shape: &Shape) -> Tensor {
     Tensor::ones(IxDyn(&shape.dim))
 }
 
-pub fn mem_size(x:&Tensor) -> usize {
+pub fn mem_size(x: &Tensor) -> usize {
     mem::size_of_val(x) + x.len() * mem::size_of::<f32>()
 }
 
@@ -29,7 +66,11 @@ pub fn logsumexp(x: TensorView, axis: usize, keep_dims: bool) -> Tensor {
     }
 
     let max = (&x)
-        .fold_axis(Axis(axis), f32::MIN, move |&a, &b| if a > b { a } else { b })
+        .fold_axis(
+            Axis(axis),
+            f32::MIN,
+            move |&a, &b| if a > b { a } else { b },
+        )
         .into_shape(IxDyn(&shape))
         .unwrap();
 
@@ -97,7 +138,7 @@ pub fn matvec(a: TensorView, b: TensorView) -> Result<Tensor, ShapeError> {
         if let Ok(stacked) = ndarray::stack(Axis(0), &c_view) {
             Ok(stacked)
         } else {
-            return Err(ShapeError::new("stacking failed"));
+            Err(ShapeError::new("stacking failed"))
         }
     }
 }
@@ -157,7 +198,7 @@ pub fn matmul(a: TensorView, b: TensorView) -> Result<Tensor, ShapeError> {
         if let Ok(stacked) = ndarray::stack(Axis(0), &c_view) {
             Ok(stacked)
         } else {
-            return Err(ShapeError::new("stacking failed"));
+            Err(ShapeError::new("stacking failed"))
         }
     }
 }

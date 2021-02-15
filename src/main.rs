@@ -1,33 +1,37 @@
 #![feature(duration_constants)]
 #![feature(duration_zero)]
 #![feature(box_syntax)]
+#![feature(nll)]
+#![feature(hash_drain_filter)]
+
 #[macro_use]
 extern crate impl_ops;
 
-use crate::autodiff::diff;
+use crate::autodiff::{diff, Var};
+use crate::data::Dataset;
 use crate::layers::activations::ReLU;
 use crate::layers::{Affine, Layer, Sequential};
-use crate::optimizers::Optimizer;
 use crate::mnist::Mnist;
-use crate::data::Dataset;
+use crate::optimizers::Optimizer;
 
 mod autodiff;
+mod data;
 mod layers;
+mod mnist;
 mod net;
 mod op;
 mod optimizers;
 mod tensor;
 mod utils;
-mod data;
-mod mnist;
+mod session;
 
 fn main() {
-
     // Load dataset
     let mnist = Mnist::from_source(
         "./data/train-images.idx3-ubyte",
         "./data/train-labels.idx1-ubyte",
-    ).unwrap();
+    )
+    .unwrap();
 
     // Model
     let model = Sequential::from(vec![
@@ -44,9 +48,9 @@ fn main() {
     model.init();
     optimizer.init();
 
-    for (images, labels) in mnist.iter().batch(10, Mnist::collate){
-        println!("{}", i);
-
+    for (images, labels) in mnist.iter().batch(10, Mnist::collate) {
+        let input = Var::from_tensor(images);
+        let labels = Var::from_tensor(labels);
 
         let logits = model.pass(&input);
         let loss = op::softmax_cross_entropy(&logits, &labels);
@@ -54,11 +58,8 @@ fn main() {
         let params = model.params().unwrap();
         let grads = diff(&loss, &params);
 
-        optimizer.update(&grads);
+        optimizer.update(grads);
     }
-
-
-
 
     // * Inline gradient update *
     // input.set_data();
@@ -67,7 +68,6 @@ fn main() {
     // optimizer.update(&grads);
 
     // * Evaluating higher-order derivatives *
-
 
     println!("Hello, world!");
 }

@@ -2,8 +2,8 @@ use crate::autodiff::{op, Op, Var};
 use crate::tensor;
 use crate::tensor::{Shape, ShapeError, Tensor};
 use ndarray::Axis;
-
-use std::ops::Neg as Neg2;
+use std::ops;
+use std::ops::{Deref, Neg as Neg2};
 
 struct Add;
 struct Sub;
@@ -45,15 +45,15 @@ impl Op for Add {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(x1.shape())
+        x0.shape().broadcast(&x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(gy, x0.shape());
-        let gx1 = sum_to(gy, x1.shape());
+        let gx0 = sum_to(gy, &x0.shape());
+        let gx1 = sum_to(gy, &x1.shape());
 
         vec![gx0, gx1]
     }
@@ -69,7 +69,7 @@ impl Op for Sub {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(x1.shape())
+        x0.shape().broadcast(&x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -79,8 +79,8 @@ impl Op for Sub {
         let gx0 = gy;
         let gx1 = neg(gy);
 
-        let gx0 = sum_to(gx0, x0.shape());
-        let gx1 = sum_to(&gx1, x1.shape());
+        let gx0 = sum_to(gx0, &x0.shape());
+        let gx1 = sum_to(&gx1, &x1.shape());
 
         vec![gx0, gx1]
     }
@@ -113,7 +113,7 @@ impl Op for Mul {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(x1.shape())
+        x0.shape().broadcast(&x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -123,8 +123,8 @@ impl Op for Mul {
         let gx0 = mul(gy, x1);
         let gx1 = mul(gy, x0);
 
-        let gx0 = sum_to(&gx0, x0.shape());
-        let gx1 = sum_to(&gx1, x1.shape());
+        let gx0 = sum_to(&gx0, &x0.shape());
+        let gx1 = sum_to(&gx1, &x1.shape());
 
         vec![gx0, gx1]
     }
@@ -140,7 +140,7 @@ impl Op for Div {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(x1.shape())
+        x0.shape().broadcast(&x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -150,8 +150,8 @@ impl Op for Div {
         let gx0 = div(gy, x1);
         let gx1 = neg(&div(&mul(gy, x0), &mul(x1, x1)));
 
-        let gx0 = sum_to(&gx0, x0.shape());
-        let gx1 = sum_to(&gx1, x1.shape());
+        let gx0 = sum_to(&gx0, &x0.shape());
+        let gx1 = sum_to(&gx1, &x1.shape());
 
         vec![gx0, gx1]
     }
@@ -179,7 +179,7 @@ impl Op for Sum {
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
         let x = x[0];
-        let gx = broadcast_to(gy, x.shape());
+        let gx = broadcast_to(gy, &x.shape());
 
         vec![gx]
     }
@@ -297,10 +297,11 @@ impl Op for Transpose {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x = x[0];
 
-        let mut d = x.shape().dim.clone();
+        let mut d = x.shape().deref().dim.clone();
+        let d_len = d.len();
 
-        if d.len() > 1 {
-            d.swap(d.len() - 1, d.len() - 2);
+        if d_len > 1 {
+            d.swap(d_len - 1, d_len - 2);
             Ok(Shape::new(&d))
         } else {
             Err(ShapeError::new("dim too short"))
@@ -365,7 +366,8 @@ impl Op for Softmax {
         // for numerical stability
         let mut y: Tensor = x - max;
         y.mapv_inplace(|x| x.exp());
-        y / y.sum_axis(Axis(self.axis))
+        let sum = y.sum_axis(Axis(self.axis));
+        y / sum
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
@@ -398,7 +400,7 @@ impl Op for SoftmaxCrossEntropy {
         let x0 = x[0];
         let x1 = x[1];
 
-        if x0.shape() != x1.shape() {
+        if x0.shape().deref() != x1.shape().deref() {
             Err(ShapeError::new("shape does not match"))
         } else {
             Ok(x0.shape().clone())
@@ -450,7 +452,7 @@ pub fn sum(x: &Var, axis: usize) -> Var {
 }
 
 pub fn sum_to(x: &Var, shape: &Shape) -> Var {
-    if x.shape() == shape {
+    if x.shape().deref() == shape {
         identity(x)
     } else {
         op(
@@ -463,7 +465,7 @@ pub fn sum_to(x: &Var, shape: &Shape) -> Var {
 }
 
 pub fn broadcast_to(x: &Var, shape: &Shape) -> Var {
-    if x.shape() == shape {
+    if x.shape().deref() == shape {
         identity(x)
     } else {
         op(
@@ -499,12 +501,25 @@ pub fn softmax_cross_entropy(x0: &Var, x1: &Var) -> Var {
     op(Box::new(SoftmaxCrossEntropy), &[x0, x1])
 }
 
-impl_op!(+ |a: Var, b: Var| -> op::add(&a, &b));
-impl_op!(+ |a: &Var, b: Var| -> op::add(a, &b));
-impl_op!(+ |a: Var, b: &Var| -> op::add(&a, b));
-impl_op!(+ |a: &Var, b: &Var| -> op::add(a, b));
+impl_op!(+ |a: Var, b: Var| -> Var { add(&a, &b) });
+impl_op!(+ |a: &Var, b: Var| -> Var { add(a, &b) });
+impl_op!(+ |a: Var, b: &Var| -> Var { add(&a, b) });
+impl_op!(+ |a: &Var, b: &Var| -> Var { add(a, b) });
 
-impl_op!(* |a: Var, b: Var| -> op::mul(&a, &b));
-impl_op!(* |a: &Var, b: Var| -> op::mul(a, &b));
-impl_op!(* |a: Var, b: &Var| -> op::mul(&a, b));
-impl_op!(* |a: &Var, b: &Var| -> op::mul(a, b));
+impl_op!(-|a: Var, b: Var| -> Var { sub(&a, &b) });
+impl_op!(-|a: &Var, b: Var| -> Var { sub(a, &b) });
+impl_op!(-|a: Var, b: &Var| -> Var { sub(&a, b) });
+impl_op!(-|a: &Var, b: &Var| -> Var { sub(a, b) });
+
+impl_op!(*|a: Var, b: Var| -> Var { mul(&a, &b) });
+impl_op!(*|a: &Var, b: Var| -> Var { mul(a, &b) });
+impl_op!(*|a: Var, b: &Var| -> Var { mul(&a, b) });
+impl_op!(*|a: &Var, b: &Var| -> Var { mul(a, b) });
+
+impl_op!(/ |a: Var, b: Var| -> Var { div(&a, &b) });
+impl_op!(/ |a: &Var, b: Var| -> Var { div(a, &b) });
+impl_op!(/ |a: Var, b: &Var| -> Var { div(&a, b) });
+impl_op!(/ |a: &Var, b: &Var| -> Var { div(a, b) });
+
+impl_op!(-|a: Var| -> Var { neg(&a) });
+impl_op!(-|a: &Var| -> Var { neg(a) });

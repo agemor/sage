@@ -1,11 +1,13 @@
 use std::fs;
 use std::io;
-use std::io::{Read, SeekFrom, Seek};
+use std::io::{Read, Seek, SeekFrom};
 
-use crate::data::{Iter, Dataset, Batch};
+use crate::data::{Dataset, Iter};
+use crate::tensor;
+use crate::tensor::{Shape, Tensor};
 
 pub type MnistItem = ([u8; Mnist::IMAGE_SIZE], u8);
-pub type MnistBatch = (u8, u8);
+pub type MnistBatch = (Tensor, Tensor);
 
 pub struct Mnist {
     images: Vec<[u8; Mnist::IMAGE_SIZE]>,
@@ -64,7 +66,26 @@ impl Mnist {
     }
 
     pub fn collate(items: &[MnistItem]) -> Option<MnistBatch> {
-        Some((0, 0))
+        // create one-hot vec
+        let mut image_batch = Vec::<f32>::with_capacity(items.len() * Mnist::IMAGE_SIZE);
+        let mut label_batch = Vec::<f32>::with_capacity(items.len() * 10);
+
+        for (image, label) in items {
+            let image_f32 = image.iter().map(|a| *a as f32).collect::<Vec<f32>>();
+
+            let mut one_hot: Vec<f32> = vec![0.0; 10];
+            one_hot[*label as usize] = 1.0;
+
+            image_batch.extend(image_f32);
+            label_batch.extend(one_hot);
+        }
+
+        let image_tensor =
+            tensor::from_vec(Shape::new(&[items.len(), Mnist::IMAGE_SIZE]), image_batch);
+
+        let label_tensor = tensor::from_vec(Shape::new(&[items.len(), 10]), label_batch);
+
+        Some((image_tensor, label_tensor))
     }
 }
 

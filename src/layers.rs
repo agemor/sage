@@ -2,6 +2,8 @@ pub mod activations;
 pub mod loss;
 
 use crate::autodiff::Var;
+use crate::tensor;
+use crate::tensor::Shape;
 
 pub trait Layer {
     fn init(&self);
@@ -60,14 +62,21 @@ pub struct Affine {
 impl Affine {
     pub fn new(input: usize, output: usize) -> Self {
         Affine {
-            kernel: Var::from_tensor(),
-            bias: Var::from_tensor(),
+            kernel: Var::with_shape(Shape::new(&[output, input])),
+            bias: Var::with_shape(Shape::new(&[output, input])),
         }
     }
 }
 
 impl Layer for Affine {
-    fn init(&self) {}
+    fn init(&self) {
+        // do some Kaiming init (targeted for the ReLU)
+        self.kernel
+            .set_data(tensor::kaiming_uniform(&self.kernel.shape(), 1.0));
+
+        self.bias
+            .set_data(tensor::kaiming_uniform(&self.bias.shape(), 1.0));
+    }
 
     fn pass(&self, x: &Var) -> Var {
         &self.kernel * x + &self.bias
