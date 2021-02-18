@@ -80,8 +80,8 @@ mod test {
 
     #[test]
     fn test_sum() {
-        let a = Tensor::from_elem([3, 10, 10], 3.0);
-        assert_eq!(a.sum(), 900.0);
+        let a = Tensor::from_elem([3, 10, 1], 3.0);
+        assert_eq!(a.sum(), 90.0_f32);
     }
 
     #[test]

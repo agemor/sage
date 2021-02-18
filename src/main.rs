@@ -4,6 +4,7 @@
 #![feature(nll)]
 #![feature(hash_drain_filter)]
 #![feature(is_sorted)]
+#![feature(const_generics)]
 
 #[macro_use]
 extern crate impl_ops;

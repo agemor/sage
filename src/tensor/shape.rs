@@ -74,9 +74,7 @@ impl Dim {
 
 
     pub fn size(&self) -> usize {
-        self.sizes.iter().fold(1, |cum_size, size| {
-            cum_size * size
-        })
+        self.sizes.iter().product()
     }
 
     pub fn ndim(&self) -> usize {
@@ -112,7 +110,7 @@ impl Dim {
 
     // calculate default strides for tensor with this dim
     pub fn default_strides(&self) -> Vec<usize> {
-        let mut strides = vec![1 as usize];
+        let mut strides = vec![1_usize];
         let mut cum_prod = 1;
 
         // tensor with (A, B, C) shape

@@ -97,7 +97,7 @@ pub struct OpNode {
 impl OpNode {
     fn new(op: Box<dyn Op>, input: &[&Var], output: &Var) -> Self {
         let rank = input
-            .into_iter()
+            .iter()
             .map(|a| a.node().rank()) // each rank
             .max() // get max rank in parent gen
             .unwrap()
@@ -120,8 +120,7 @@ impl OpNode {
 
     fn output_var(&self) -> Option<Var> {
         self.output
-            .upgrade() // try upgrade
-            .map_or(None, |e| Some(Var::from_node(e.clone())))
+            .upgrade().map(Var::from_node)
     }
 }
 

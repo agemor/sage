@@ -770,7 +770,7 @@ impl PartialEq for Tensor {
 
 impl Clone for Tensor {
     fn clone(&self) -> Self {
-        let v = self.logical_iter().map(|x| *x).collect::<Vec<f32>>();
+        let v = self.logical_iter().copied().collect::<Vec<f32>>();
         Tensor::from_vec(self.shape(), v)
     }
 }

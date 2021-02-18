@@ -15,11 +15,11 @@ pub struct Sequential {
 }
 
 impl Sequential {
-    pub fn new() -> Sequential {
+    pub fn new() -> Self {
         Sequential { layers: Vec::new() }
     }
 
-    pub fn from(layers: Vec<Box<dyn Layer>>) -> Sequential {
+    pub fn from(layers: Vec<Box<dyn Layer>>) -> Self {
         Sequential { layers }
     }
 

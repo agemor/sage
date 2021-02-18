@@ -121,7 +121,7 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.coord_iter.next().map(|index| {
             unsafe {
-                let elem = self.ptr.offset((index + self.offset) as isize);
+                let elem = self.ptr.add(index + self.offset);
                 elem.as_ref().unwrap()
             }
         })
@@ -152,7 +152,7 @@ impl<'a> Iterator for IterMut<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.coord_iter.next().map(|index| {
             unsafe {
-                let elem = self.ptr.offset((index + self.offset) as isize);
+                let elem = self.ptr.add(index + self.offset);
                 elem.as_mut().unwrap()
             }
         })
