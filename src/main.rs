@@ -55,8 +55,8 @@ fn main() {
         let input = Var::from_tensor(images);
         let labels = Var::from_tensor(labels);
 
-        println!("{:?}", input.shape().dim);
-        println!("{:?}", labels.shape().dim);
+        println!("{:?}", input.shape());
+        println!("{:?}", labels.shape());
 
         let logits = model.pass(&input);
         let loss = op::softmax_cross_entropy(&logits, &labels);

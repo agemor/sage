@@ -1,4 +1,4 @@
-use crate::tensor::{Tensor, to_unsigned_index};
+use crate::tensor::{to_unsigned_index, Tensor};
 
 impl Tensor {
     pub fn sum(&self) -> f32 {
@@ -7,9 +7,7 @@ impl Tensor {
 
     pub fn max_axis(&self, axis: isize) -> Tensor {
         // wow!
-        self.fold_axis(axis, f32::MIN, |&a, &b| {
-            if a > b { a } else { b }
-        })
+        self.fold_axis(axis, f32::MIN, |&a, &b| if a > b { a } else { b })
     }
 
     pub fn sum_axis(&self, axis: isize) -> Tensor {
@@ -24,8 +22,28 @@ impl Tensor {
         }
         res
     }
-}
 
+    pub fn softmax(&self, axis: isize) -> Tensor {
+        let max = self.max_axis(axis).expand_dims(axis);
+
+        // for numerical stability
+        let mut y = self - max;
+        y.mapv_inplace(|x| x.exp());
+
+        let sum = y.sum_axis(axis);
+        y / sum
+    }
+
+    pub fn log_sum_exp(&self, axis: isize) -> Tensor {
+        let max = self.max_axis(axis).expand_dims(axis);
+
+        let mut y = self - &max;
+        y.mapv_inplace(|x| x.exp());
+        let mut sum = y.sum_axis(axis);
+        sum.mapv_inplace(move |x| x.ln());
+        sum + max
+    }
+}
 
 // math utility methods
 pub fn add(a: &Tensor, b: &Tensor) -> Tensor {
@@ -48,7 +66,6 @@ pub fn neg(a: &Tensor) -> Tensor {
     a.map(|&a| -a)
 }
 
-
 pub fn exp(t: &mut Tensor) {
     t.mapv_inplace(|x| x.exp());
 }
@@ -56,7 +73,6 @@ pub fn exp(t: &mut Tensor) {
 pub fn ln(t: &mut Tensor) {
     t.mapv_inplace(|x| x.ln());
 }
-
 
 #[cfg(test)]
 mod test {
@@ -76,7 +92,10 @@ mod test {
         // (3, 4, 5)
         let c = Tensor::cat(&[a, b], 1).unwrap();
 
-        assert_eq!(c.max_axis(1).expand_dims(1), Tensor::from_elem([3, 1, 5], 10.0));
+        assert_eq!(
+            c.max_axis(1).expand_dims(1),
+            Tensor::from_elem([3, 1, 5], 10.0)
+        );
     }
 
     #[test]

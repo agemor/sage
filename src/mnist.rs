@@ -4,7 +4,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use crate::data::{Dataset, Iter};
 use crate::tensor;
-use crate::tensor::{Shape, Tensor};
+use crate::tensor::{Tensor};
 
 pub type MnistItem = ([u8; Mnist::IMAGE_SIZE], u8);
 pub type MnistBatch = (Tensor, Tensor);
@@ -81,9 +81,9 @@ impl Mnist {
         }
 
         let image_tensor =
-            tensor::from_vec(Shape::new(&[items.len(), Mnist::IMAGE_SIZE]), image_batch);
+            Tensor::from_vec([items.len(), Mnist::IMAGE_SIZE], image_batch);
 
-        let label_tensor = tensor::from_vec(Shape::new(&[items.len(), 10]), label_batch);
+        let label_tensor = Tensor::from_vec([items.len(), 10], label_batch);
 
         Some((image_tensor, label_tensor))
     }

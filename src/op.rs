@@ -1,9 +1,7 @@
 use crate::autodiff::{op, Op, Var};
-use crate::tensor;
-use crate::tensor::{Shape, ShapeError, Tensor};
-use ndarray::Axis;
+use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
+use crate::tensor::Tensor;
 use std::ops;
-use std::ops::{Deref, Neg as Neg2};
 
 // basic arithmetics
 struct Add;
@@ -17,10 +15,10 @@ struct Sum {
     axis: usize,
 }
 struct SumTo {
-    shape: Shape,
+    shape: Dim,
 }
 struct BroadcastTo {
-    shape: Shape,
+    shape: Dim,
 }
 
 // matrix operations
@@ -34,7 +32,7 @@ struct Select;
 
 // activations
 struct ReLU {
-    inplace:bool
+    inplace: bool,
 }
 struct Binarize {
     threshold: f32,
@@ -55,10 +53,11 @@ impl Op for Add {
         x0 + x1
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(&x1.shape())
+
+        Dim::union_k(x0.shape(), x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -79,10 +78,10 @@ impl Op for Sub {
         x0 - x1
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(&x1.shape())
+        Dim::union_k(x0.shape(), x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -102,12 +101,12 @@ impl Op for Sub {
 impl Op for Neg {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        x.neg()
+        0.0-x
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
-        Ok(x.shape().clone())
+        Ok(Dim::new(x.shape()))
     }
 
     fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -123,10 +122,10 @@ impl Op for Mul {
         x0 * x1
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(&x1.shape())
+        Dim::union_k(x0.shape(), x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -150,10 +149,10 @@ impl Op for Div {
         x0 / x1
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
-        x0.shape().broadcast(&x1.shape())
+        Dim::union_k(x0.shape(), x1.shape())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -173,18 +172,18 @@ impl Op for Div {
 impl Op for Sum {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        x.sum_axis(Axis(self.axis))
+        x.sum_axis(self.axis as isize)
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
 
-        let mut d = x.shape().dim.clone();
+        let mut d = x.shape().into_dimension();
 
         // we keep axis dim (i.e., keepdim=True in PyTorch)
-        if d.len() > self.axis {
-            d[self.axis] = 1;
-            Ok(Shape::new(&d))
+        if d.ndim() > self.axis {
+            d.remove(self.axis);
+            Ok(d)
         } else {
             Err(ShapeError::new("cannot sum on nonexistent axis"))
         }
@@ -201,40 +200,47 @@ impl Op for Sum {
 impl Op for SumTo {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        let mut y: Tensor = x.clone();
-        let mut pad = vec![1, x.ndim() - self.shape.ndim()];
-        pad.extend_from_slice(&self.shape.dim);
 
-        for (d, axis) in pad.iter().rev().enumerate() {
-            if d == 1 {
-                y = y.sum_axis(Axis(*axis))
-            }
-        }
+        let mut pad = vec![1, x.rank() - self.shape.ndim()];
+        pad.extend_from_slice(&self.shape.sizes);
+
+        let y = pad
+            .iter()
+            .rev()
+            .enumerate()
+            .fold(x.clone(), |y, (dim_size, &axis)| {
+                if dim_size == 1 {
+                    y.sum_axis(axis as isize)
+                } else {
+                    y
+                }
+            });
+
         y
     }
 
-    fn forward(&self, _x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, _x: &[&Var]) -> Result<Dim, ShapeError> {
         Ok(self.shape.clone())
     }
 
     fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
-        let gx = broadcast_to(gy, &self.shape);
+        let gx = broadcast_to(gy, &self.shape.sizes);
         vec![gx]
     }
 }
 
 impl Op for BroadcastTo {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
-        // TODO: shared tensor
-        x[0].clone()
+        let x = x[0];
+        x.upcast(&self.shape).unwrap()
     }
 
-    fn forward(&self, _x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, _x: &[&Var]) -> Result<Dim, ShapeError> {
         Ok(self.shape.clone())
     }
 
     fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
-        let gx = sum_to(gy, &self.shape);
+        let gx = sum_to(gy, &self.shape.sizes);
         vec![gx]
     }
 }
@@ -244,15 +250,15 @@ impl Op for MatMul {
         let x0 = x[0];
         let x1 = x[1];
 
-        tensor::matmul(x0.view(), x1.view()).unwrap()
+        x0.matmul(x1)
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
 
-        let x0_dim = &x0.shape().dim;
-        let x1_dim = &x1.shape().dim;
+        let x0_dim = x0.shape();
+        let x1_dim = x1.shape();
 
         let x0_ndim = x0_dim.len();
         let x1_ndim = x1_dim.len();
@@ -269,13 +275,13 @@ impl Op for MatMul {
         let x1_bat_dim = &x1_dim[0..x1_ndim - 2];
 
         // shape broadcast
-        let mut y_dim = tensor::broadcast(x0_bat_dim, x1_bat_dim)?;
+        let mut y_dim = Dim::union_k(x0_bat_dim, x1_bat_dim)?.sizes;
 
         // add matrix dim
         y_dim.push(x0_dim[x0_ndim - 2]);
         y_dim.push(x1_dim[x1_ndim - 1]);
 
-        Ok(Shape::new(&y_dim))
+        Ok(Dim::new(&y_dim))
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -302,15 +308,15 @@ impl Op for MatVec {
         let x0 = x[0];
         let x1 = x[1];
 
-        tensor::matvec(x0.view(), x1.view()).unwrap()
+        x0.matvec(x1)
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
 
-        let x0_dim = &x0.shape().dim;
-        let x1_dim = &x1.shape().dim;
+        let x0_dim = x0.shape();
+        let x1_dim = x1.shape();
 
         let x0_ndim = x0_dim.len();
         let x1_ndim = x1_dim.len();
@@ -327,12 +333,12 @@ impl Op for MatVec {
         let x1_bat_dim = &x1_dim[0..x1_ndim - 1];
 
         // shape broadcast
-        let mut y_dim = tensor::broadcast(x0_bat_dim, x1_bat_dim)?;
+        let mut y_dim = Dim::union_k(x0_bat_dim, x1_bat_dim)?.sizes;
 
         // add matrix dim
         y_dim.push(x0_dim[x0_ndim - 2]);
 
-        Ok(Shape::new(&y_dim))
+        Ok(Dim::new(&y_dim))
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -354,51 +360,22 @@ impl Op for MatVec {
     }
 }
 
-
-impl Op for Reshape {
-    fn compute(&self, x: &[&Tensor]) -> Tensor {
-
-        let x = x[0];
-
-        unimplemented!()
-    }
-
-
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
-        unimplemented!()
-    }
-}
-
-impl Op for Select {
-    fn compute(&self, x: &[&Tensor]) -> Tensor {
-        unimplemented!()
-    }
-
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
-        unimplemented!()
-    }
-}
-
-
 // Swap last two components of tensor
 impl Op for Transpose {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        let mut y = x.clone();
-
-        y.swap_axes(x.ndim() - 2, x.ndim() - 1);
-        y
+        x.transpose((x.rank() - 2) as isize, (x.rank() - 1) as isize)
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
 
-        let mut d = x.shape().dim;
+        let mut d = x.shape().to_vec();
         let d_len = d.len();
 
         if d_len > 1 {
             d.swap(d_len - 1, d_len - 2);
-            Ok(Shape::new(&d))
+            Ok(Dim::new(&d))
         } else {
             Err(ShapeError::new("dim too short"))
         }
@@ -414,12 +391,12 @@ impl Op for Transpose {
 impl Op for ReLU {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        x.mapv(|x| if x > 0.0 { x } else { 0.0 })
+        x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
-        Ok(x.shape().clone())
+        Ok(x.shape().into_dimension())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -433,12 +410,12 @@ impl Op for Binarize {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
 
-        x.mapv(|x| if x > self.threshold { 1.0 } else { 0.0 })
+        x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
-        Ok(x.shape().clone())
+        Ok(x.shape().into_dimension())
     }
 
     fn backward(&self, _x: &[&Var], _gy: &Var) -> Vec<Var> {
@@ -453,22 +430,21 @@ impl Op for Softmax {
         //let mut reduced_shape = x.shape().to_vec();
         //reduced_shape[self.axis] = 1;
 
-        let max: &Tensor = &x.fold_axis(
-            Axis(self.axis),
-            f32::MIN,
-            move |&a, &b| if a > b { a } else { b },
-        );
+        let max = x
+            .max_axis(self.axis as isize)
+            .expand_dims(self.axis as isize);
 
         // for numerical stability
         let mut y: Tensor = x - max;
         y.mapv_inplace(|x| x.exp());
-        let sum = y.sum_axis(Axis(self.axis));
+
+        let sum = y.sum_axis(self.axis as isize);
         y / sum
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x = x[0];
-        Ok(x.shape().clone())
+        Ok(x.shape().into_dimension())
     }
 
     fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
@@ -487,19 +463,19 @@ impl Op for SoftmaxCrossEntropy {
         let x0 = x[0];
         let t = x[1];
 
-        let log_z = tensor::logsumexp(x0.view(), 1, true);
-        let log_p: Tensor = log_z * t;
-        log_p.sum_axis(Axis(1)).neg()
+        let log_z = x0.log_sum_exp(1);
+        let log_p = log_z * t;
+        -log_p.sum_axis(1)
     }
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
         let x0 = x[0];
         let x1 = x[1];
 
         if x0.shape() != x1.shape() {
             Err(ShapeError::new("shape does not match"))
         } else {
-            Ok(x0.shape().clone())
+            Ok(x0.shape().into_dimension())
         }
     }
 
@@ -547,26 +523,26 @@ pub fn sum(x: &Var, axis: usize) -> Var {
     op(Box::new(Sum { axis }), &[x])
 }
 
-pub fn sum_to(x: &Var, shape: &Shape) -> Var {
-    if &x.shape() == shape {
+pub fn sum_to(x: &Var, shape: &[usize]) -> Var {
+    if x.shape() == shape {
         identity(x)
     } else {
         op(
             Box::new(SumTo {
-                shape: shape.clone(),
+                shape: shape.into_dimension(),
             }),
             &[x],
         )
     }
 }
 
-pub fn broadcast_to(x: &Var, shape: &Shape) -> Var {
-    if &x.shape() == shape {
+pub fn broadcast_to(x: &Var, shape: &[usize]) -> Var {
+    if x.shape() == shape {
         identity(x)
     } else {
         op(
             Box::new(BroadcastTo {
-                shape: shape.clone(),
+                shape: shape.into_dimension(),
             }),
             &[x],
         )
@@ -586,7 +562,7 @@ pub fn transpose(x: &Var) -> Var {
 }
 
 pub fn relu(x: &Var) -> Var {
-    op(Box::new(ReLU), &[x])
+    op(Box::new(ReLU { inplace: false }), &[x])
 }
 
 pub fn binarize(x: &Var, threshold: f32) -> Var {

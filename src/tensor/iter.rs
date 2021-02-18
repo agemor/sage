@@ -1,7 +1,5 @@
 use crate::tensor::Tensor;
-use crate::tensor::shape::Dim;
-use itertools::Itertools;
-use std::slice;
+
 use std::marker::PhantomData;
 
 

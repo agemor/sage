@@ -77,7 +77,7 @@ impl Session {
                     let out_tensor = parent.op.compute(&in_tensors2);
 
                     let profile = RuntimeProfile {
-                        mem_store: tensor::mem_size(&out_tensor),
+                        mem_store: out_tensor.mem_size(),
                         call_time: timer.elapsed(),
                     };
 

@@ -7,19 +7,16 @@ use std::rc::{Rc, Weak};
 
 use std::time::Duration;
 
+use crate::op;
 use crate::session::Session;
-use crate::tensor::{Shape, ShapeError, Tensor};
-use crate::{op, tensor};
+use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
+use crate::tensor::Tensor;
+use std::ops::Deref;
 
 pub trait Op {
     fn compute(&self, x: &[&Tensor]) -> Tensor;
 
-    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
-        x.iter().try_fold(x[0].shape().clone(), |s, x| {
-            // try broadcasting
-            s.broadcast(&x.shape())
-        })
-    }
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError>;
 
     fn mem_req(&self) -> usize {
         mem::size_of::<f32>()
@@ -53,7 +50,7 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
     let mut grads = HashMap::<Var, Var>::new();
 
     // The 'genesis' gy/gy, (which always equals to 1)
-    grads.insert(y.clone(), Var::from_tensor(tensor::ones(&y.shape())));
+    grads.insert(y.clone(), Var::from_tensor(Tensor::ones(y.shape())));
 
     queue.push(y.clone().into_ranked());
 
@@ -136,7 +133,7 @@ pub struct RuntimeProfile {
 
 pub struct VarNode {
     pub data: Option<Tensor>,
-    pub shape: Shape,
+    pub shape: Dim,
     pub parent: Option<OpNode>,
 
     // memory/time profile
@@ -207,15 +204,21 @@ impl VarNode {
 }
 
 pub struct Var {
+    shape: Dim,
     node: Rc<RefCell<VarNode>>,
 }
 
 impl Var {
-    pub fn with_shape(shape: Shape) -> Var {
+    pub fn with_shape<D>(shape: D) -> Var
+    where
+        D: IntoDimension,
+    {
+        let dim = shape.into_dimension();
         Var {
+            shape: dim.clone(),
             node: Rc::new(RefCell::new(VarNode {
                 data: None,
-                shape,
+                shape: dim,
                 parent: None,
                 runtime: Some(RuntimeProfile {
                     mem_store: 0,
@@ -227,11 +230,12 @@ impl Var {
 
     pub fn from_tensor(data: Tensor) -> Var {
         Var {
+            shape: Dim::new(data.shape()),
             node: Rc::new(RefCell::new(VarNode {
-                shape: Shape::new(&data.shape()),
+                shape: Dim::new(data.shape()),
                 parent: None,
                 runtime: Some(RuntimeProfile {
-                    mem_store: tensor::mem_size(&data),
+                    mem_store: data.mem_size(),
                     call_time: Duration::ZERO,
                 }),
                 data: Some(data),
@@ -254,7 +258,9 @@ impl Var {
     }
 
     fn from_node(node: Rc<RefCell<VarNode>>) -> Var {
-        Var { node }
+        let n = RefCell::borrow(&node).shape.clone();
+
+        Var { shape: n, node }
     }
 
     pub fn is_evaluated(&self) -> bool {
@@ -280,8 +286,8 @@ impl Var {
         self.data_unchecked()
     }
 
-    pub fn shape(&self) -> Shape {
-        self.node.borrow().shape.clone()
+    pub fn shape(&self) -> &[usize] {
+        &self.shape.sizes
     }
 
     pub fn set_data(&self, data: Tensor) {
@@ -299,6 +305,7 @@ impl PartialEq for Var {
 impl Clone for Var {
     fn clone(&self) -> Self {
         Var {
+            shape: self.shape.clone(),
             node: self.node.clone(),
         }
     }

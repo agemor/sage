@@ -1,6 +1,6 @@
-// simple tensor implementation using ndarray.
+// simple tensor operations... from scratch!
 
-use std::cell::{Ref, RefCell, RefMut, UnsafeCell};
+use std::cell::UnsafeCell;
 use std::fmt::Formatter;
 use std::rc::Rc;
 use std::{fmt, ops, slice};
@@ -13,12 +13,12 @@ use rand::{thread_rng, SeedableRng};
 use rand_distr::Normal;
 
 use crate::tensor::iter::{AlongAxisIter, Iter, IterMut};
-use crate::tensor::shape::{IntoDimension, Dim, ShapeError};
+use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
 
-mod init;
-mod iter;
-mod math;
-mod shape;
+pub mod init;
+pub mod iter;
+pub mod math;
+pub mod shape;
 
 /////////////////////////// Tensor implementation ///////////////////////////
 
@@ -765,6 +765,13 @@ impl PartialEq for Tensor {
         self.logical_iter()
             .zip(other.logical_iter())
             .all(|(a, b)| a == b)
+    }
+}
+
+impl Clone for Tensor {
+    fn clone(&self) -> Self {
+        let v = self.logical_iter().map(|x| *x).collect::<Vec<f32>>();
+        Tensor::from_vec(self.shape(), v)
     }
 }
 

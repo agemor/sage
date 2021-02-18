@@ -38,6 +38,41 @@ impl Dim {
         shape.into_dimension()
     }
 
+    pub fn union_k<D>(a:D, b:D) -> Result<Dim, ShapeError>
+    where D: IntoDimension
+    {
+
+        let a= a.into_dimension();
+        let b= b.into_dimension();
+
+        if a == b {
+            Ok(a)
+        }
+        // Do union
+        else {
+            let (longer, shorter) = if a.ndim() > b.ndim() { (a, b) } else { (b, a) };
+
+            let mut union_dim = shorter.clone();
+
+            for i in 0..(longer.ndim() - shorter.ndim()) {
+                union_dim.add(i, longer[i]);
+            }
+
+            for (a, b) in union_dim.iter_mut().zip(longer.iter()) {
+                if *a != *b {
+                    if *a == 1 {
+                        *a = *b;
+                    } else if *b != 1 {
+                        return Err(ShapeError::new("invalid broadcast"));
+                    }
+                }
+            }
+            Ok(union_dim)
+        }
+    }
+
+
+
     pub fn size(&self) -> usize {
         self.sizes.iter().fold(1, |cum_size, size| {
             cum_size * size
@@ -59,8 +94,6 @@ impl Dim {
             let mut union_dim = shorter.clone();
 
             for i in 0..(longer.ndim() - shorter.ndim()) {
-                println!("{:?}", longer[i]);
-
                 union_dim.add(i, longer[i]);
             }
 
