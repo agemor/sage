@@ -5,16 +5,17 @@ use ndarray::Axis;
 use std::ops;
 use std::ops::{Deref, Neg as Neg2};
 
+// basic arithmetics
 struct Add;
 struct Sub;
 struct Neg;
 struct Mul;
 struct Div;
 
+// broadcasting operations
 struct Sum {
     axis: usize,
 }
-
 struct SumTo {
     shape: Shape,
 }
@@ -22,17 +23,29 @@ struct BroadcastTo {
     shape: Shape,
 }
 
+// matrix operations
 struct MatMul;
-struct Transpose;
+struct MatVec;
 
-struct ReLU;
+// shaping operations
+struct Transpose;
+struct Reshape;
+struct Select;
+
+// activations
+struct ReLU {
+    inplace:bool
+}
 struct Binarize {
     threshold: f32,
 }
 
+// softmax
 struct Softmax {
     axis: usize,
 }
+
+// loss functions
 struct SoftmaxCrossEntropy;
 
 impl Op for Add {
@@ -284,6 +297,89 @@ impl Op for MatMul {
     }
 }
 
+impl Op for MatVec {
+    fn compute(&self, x: &[&Tensor]) -> Tensor {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        tensor::matvec(x0.view(), x1.view()).unwrap()
+    }
+
+    fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        let x0_dim = &x0.shape().dim;
+        let x1_dim = &x1.shape().dim;
+
+        let x0_ndim = x0_dim.len();
+        let x1_ndim = x1_dim.len();
+
+        if x0_ndim < 2 || x1_ndim < 1 {
+            return Err(ShapeError::new("invalid matrix or vector"));
+        }
+
+        if x0_dim[x0_ndim - 1] != x1_dim[x1_ndim - 1] {
+            return Err(ShapeError::new("incompatible matrix-vector"));
+        }
+
+        let x0_bat_dim = &x0_dim[0..x0_ndim - 2];
+        let x1_bat_dim = &x1_dim[0..x1_ndim - 1];
+
+        // shape broadcast
+        let mut y_dim = tensor::broadcast(x0_bat_dim, x1_bat_dim)?;
+
+        // add matrix dim
+        y_dim.push(x0_dim[x0_ndim - 2]);
+
+        Ok(Shape::new(&y_dim))
+    }
+
+    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+        // (*, A, B)
+        let x0 = x[0];
+
+        // (*, B)
+        let x1 = x[1];
+
+        // gy: (*, A)
+
+        // (*, A, B) = (*, A, 1) (*, 1, B)
+        let gx0 = matmul(gy, &transpose(x1));
+
+        // (*, B) = (*, B, A) (*, A)
+        let gx1 = matvec(&transpose(x0), gy);
+
+        vec![gx0, gx1]
+    }
+}
+
+
+impl Op for Reshape {
+    fn compute(&self, x: &[&Tensor]) -> Tensor {
+
+        let x = x[0];
+
+        unimplemented!()
+    }
+
+
+    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+        unimplemented!()
+    }
+}
+
+impl Op for Select {
+    fn compute(&self, x: &[&Tensor]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+        unimplemented!()
+    }
+}
+
+
 // Swap last two components of tensor
 impl Op for Transpose {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
@@ -297,7 +393,7 @@ impl Op for Transpose {
     fn forward(&self, x: &[&Var]) -> Result<Shape, ShapeError> {
         let x = x[0];
 
-        let mut d = x.shape().deref().dim.clone();
+        let mut d = x.shape().dim;
         let d_len = d.len();
 
         if d_len > 1 {
@@ -400,7 +496,7 @@ impl Op for SoftmaxCrossEntropy {
         let x0 = x[0];
         let x1 = x[1];
 
-        if x0.shape().deref() != x1.shape().deref() {
+        if x0.shape() != x1.shape() {
             Err(ShapeError::new("shape does not match"))
         } else {
             Ok(x0.shape().clone())
@@ -452,7 +548,7 @@ pub fn sum(x: &Var, axis: usize) -> Var {
 }
 
 pub fn sum_to(x: &Var, shape: &Shape) -> Var {
-    if x.shape().deref() == shape {
+    if &x.shape() == shape {
         identity(x)
     } else {
         op(
@@ -465,7 +561,7 @@ pub fn sum_to(x: &Var, shape: &Shape) -> Var {
 }
 
 pub fn broadcast_to(x: &Var, shape: &Shape) -> Var {
-    if x.shape().deref() == shape {
+    if &x.shape() == shape {
         identity(x)
     } else {
         op(
@@ -479,6 +575,10 @@ pub fn broadcast_to(x: &Var, shape: &Shape) -> Var {
 
 pub fn matmul(x0: &Var, x1: &Var) -> Var {
     op(Box::new(MatMul), &[x0, x1])
+}
+
+pub fn matvec(x0: &Var, x1: &Var) -> Var {
+    op(Box::new(MatVec), &[x0, x1])
 }
 
 pub fn transpose(x: &Var) -> Var {

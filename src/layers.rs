@@ -2,7 +2,7 @@ pub mod activations;
 pub mod loss;
 
 use crate::autodiff::Var;
-use crate::tensor;
+use crate::{tensor, op};
 use crate::tensor::Shape;
 
 pub trait Layer {
@@ -70,6 +70,7 @@ impl Affine {
 
 impl Layer for Affine {
     fn init(&self) {
+
         // do some Kaiming init (targeted for the ReLU)
         self.kernel
             .set_data(tensor::kaiming_uniform(&self.kernel.shape(), 1.0));
@@ -79,7 +80,7 @@ impl Layer for Affine {
     }
 
     fn pass(&self, x: &Var) -> Var {
-        &self.kernel * x + &self.bias
+        op::matvec(&self.kernel, x) + &self.bias
     }
 
     fn params(&self) -> Option<Vec<&Var>> {

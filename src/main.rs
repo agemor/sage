@@ -3,6 +3,7 @@
 #![feature(box_syntax)]
 #![feature(nll)]
 #![feature(hash_drain_filter)]
+#![feature(is_sorted)]
 
 #[macro_use]
 extern crate impl_ops;
@@ -35,9 +36,9 @@ fn main() {
 
     // Model
     let model = Sequential::from(vec![
-        box Affine::new(256, 32),
+        box Affine::new(128, 784),
         box ReLU,
-        box Affine::new(32, 16),
+        box Affine::new(10, 128),
         box ReLU,
     ]);
 
@@ -48,9 +49,14 @@ fn main() {
     model.init();
     optimizer.init();
 
+    println!("MNIST training started!");
+
     for (images, labels) in mnist.iter().batch(10, Mnist::collate) {
         let input = Var::from_tensor(images);
         let labels = Var::from_tensor(labels);
+
+        println!("{:?}", input.shape().dim);
+        println!("{:?}", labels.shape().dim);
 
         let logits = model.pass(&input);
         let loss = op::softmax_cross_entropy(&logits, &labels);

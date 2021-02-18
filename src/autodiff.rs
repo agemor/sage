@@ -280,8 +280,8 @@ impl Var {
         self.data_unchecked()
     }
 
-    pub fn shape(&self) -> Ref<Shape> {
-        Ref::map(self.node(), |x| &x.shape)
+    pub fn shape(&self) -> Shape {
+        self.node.borrow().shape.clone()
     }
 
     pub fn set_data(&self, data: Tensor) {
