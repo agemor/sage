@@ -101,7 +101,7 @@ impl Op for Sub {
 impl Op for Neg {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
-        0.0-x
+        0.0 - x
     }
 
     fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {

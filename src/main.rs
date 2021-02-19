@@ -37,9 +37,9 @@ fn main() {
 
     // Model
     let model = Sequential::from(vec![
-        box Affine::new(128, 784),
+        box Affine::new(784, 128),
         box ReLU,
-        box Affine::new(10, 128),
+        box Affine::new(128, 10),
         box ReLU,
     ]);
 
