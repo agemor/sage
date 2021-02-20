@@ -12,6 +12,7 @@ use crate::session::Session;
 use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
 use crate::tensor::Tensor;
 use std::ops::Deref;
+use itertools::Itertools;
 
 pub trait Op {
     fn compute(&self, x: &[&Tensor]) -> Tensor;
@@ -81,6 +82,12 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
 
     // aggregate outputs... unused gradients are dropped.
     grads.retain(|ref v, _| xs.contains(v));
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    // evaluate grads
+    Session::with_budget(grad_vec, 10000).eval();
+
     grads
 }
 
@@ -209,8 +216,8 @@ pub struct Var {
 
 impl Var {
     pub fn with_shape<D>(shape: D) -> Var
-    where
-        D: IntoDimension,
+        where
+            D: IntoDimension,
     {
         let dim = shape.into_dimension();
         Var {
@@ -277,7 +284,7 @@ impl Var {
 
     // retrieve tensor, evaluate if does not have one.
     pub fn data(&self) -> Ref<Tensor> {
-        if self.is_evaluated() {
+        if !self.is_evaluated() {
             let mut session = Session::with_budget(vec![self.clone()], 0);
             session.eval();
         }
@@ -285,9 +292,23 @@ impl Var {
         self.data_unchecked()
     }
 
+    pub fn rank(&self) -> usize {
+        self.shape.ndim()
+    }
+
     pub fn shape(&self) -> &[usize] {
         &self.shape.sizes
     }
+
+    pub fn update_grads(&self, grad: Tensor) {
+        let mut node = self.node_mut();
+        let param = node.data.as_ref().unwrap();
+
+        let new_param = (param - grad);//.mean_axis(0);
+
+        node.data = Some(new_param);
+    }
+
 
     pub fn set_data(&self, data: Tensor) {
         self.node_mut().data = Some(data);
@@ -295,6 +316,7 @@ impl Var {
 }
 
 impl Eq for Var {}
+
 impl PartialEq for Var {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.node, &other.node)

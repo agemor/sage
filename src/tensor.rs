@@ -674,12 +674,12 @@ impl Tensor {
             unsafe {
                 let offset_ptr = self.arr_mut().as_mut_ptr().offset(self.offset as isize);
                 let s = slice::from_raw_parts_mut(offset_ptr, self.size());
-                s.iter_mut().map(|x| *x = f(x));
+                s.iter_mut().for_each(|x| *x = f(x));
             }
         }
         // order does not matter..  every element is only visited once.
         else {
-            self.random_iter_mut().map(|x| *x = f(x));
+            self.random_iter_mut().for_each(|x| *x = f(x));
         }
     }
 

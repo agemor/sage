@@ -23,6 +23,12 @@ impl Tensor {
         res
     }
 
+    pub fn mean_axis(&self, axis: isize) -> Tensor {
+        let axis_u = to_unsigned_index(axis, self.rank());
+
+        self.sum_axis(axis) / self.dim[axis_u] as f32
+    }
+
     pub fn softmax(&self, axis: isize) -> Tensor {
         let max = self.max_axis(axis).expand_dims(axis);
 
@@ -38,9 +44,11 @@ impl Tensor {
         let max = self.max_axis(axis).expand_dims(axis);
 
         let mut y = self - &max;
+
         y.mapv_inplace(|x| x.exp());
-        let mut sum = y.sum_axis(axis);
+        let mut sum = y.sum_axis(axis).expand_dims(axis);
         sum.mapv_inplace(move |x| x.ln());
+
         sum + max
     }
 }

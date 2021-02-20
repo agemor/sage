@@ -21,14 +21,14 @@ impl SGD {
 
 impl Optimizer for SGD {
     fn update(&self, grads: HashMap<Var, Var>) {
+
         for (param, grad) in grads {
-            let param_tensor = param.data();
             let grad_tensor = grad.data();
 
-            let a = param_tensor.deref();
             let b = grad_tensor.deref();
 
-            param.set_data(a - &(b * self.lr));
+
+            param.update_grads(b * self.lr);
         }
     }
 }

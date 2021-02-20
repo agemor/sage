@@ -3,6 +3,7 @@ pub mod loss;
 
 use crate::autodiff::Var;
 use crate::{op, tensor};
+use crate::tensor::Tensor;
 
 pub trait Layer {
     fn init(&self);
@@ -62,7 +63,7 @@ impl Affine {
     pub fn new(input: usize, output: usize) -> Self {
         Affine {
             kernel: Var::with_shape([output, input]),
-            bias: Var::with_shape([output, input]),
+            bias: Var::with_shape([output]),
         }
     }
 }
@@ -74,7 +75,7 @@ impl Layer for Affine {
             .set_data(tensor::init::kaiming_uniform(self.kernel.shape(), 1.0));
 
         self.bias
-            .set_data(tensor::init::kaiming_uniform(self.bias.shape(), 1.0));
+            .set_data(Tensor::zeros(self.bias.shape()));
     }
 
     fn pass(&self, x: &Var) -> Var {

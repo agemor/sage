@@ -32,13 +32,14 @@ impl Session {
         // initialize stack with target variables
         stack.extend(self.targets.clone());
 
+
         while !stack.is_empty() {
             let var = stack.last().cloned().unwrap();
 
-            let mut var_node = var.node_mut();
-
             // if not evaluated...
             if !var.is_evaluated() {
+                let mut var_node = var.node_mut();
+
                 // must unwrap, as a node must have either data or parent.
                 let parent = var_node.parent.as_ref().unwrap();
 
@@ -55,10 +56,10 @@ impl Session {
                     // exceeds mem budget?
                     if parent.op.mem_req() > self.mem_budget {
                         // Let's start with something basic.
-                        self.collect_garbage();
+                        //self.collect_garbage();
 
                         // ... and move on to the more sophisticated one, only when required.
-                        self.greedy_drop(&in_vars, parent.op.mem_req());
+                        // self.greedy_drop(&in_vars, parent.op.mem_req());
                     }
 
                     let in_tensors = in_vars
@@ -96,6 +97,7 @@ impl Session {
             // (i.e., printing loss value before gradient evaluation)
             else {
                 self.resolved.insert(var.clone());
+                stack.pop();
             }
         }
     }

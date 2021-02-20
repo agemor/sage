@@ -5,35 +5,49 @@ use std::ops;
 
 // basic arithmetics
 struct Add;
+
 struct Sub;
+
 struct Neg;
+
 struct Mul;
+
 struct Div;
 
 // broadcasting operations
 struct Sum {
     axis: usize,
 }
+
 struct SumTo {
     shape: Dim,
 }
+
 struct BroadcastTo {
     shape: Dim,
 }
 
 // matrix operations
 struct MatMul;
+
 struct MatVec;
 
 // shaping operations
 struct Transpose;
+
 struct Reshape;
+
 struct Select;
+
+struct ExpandDims { axis: usize }
+
+struct Squeeze { axis: usize }
 
 // activations
 struct ReLU {
     inplace: bool,
 }
+
 struct Binarize {
     threshold: f32,
 }
@@ -201,20 +215,24 @@ impl Op for SumTo {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
         let x = x[0];
 
-        let mut pad = vec![1, x.rank() - self.shape.ndim()];
+        let mut pad = vec![1; x.rank() - self.shape.ndim()];
         pad.extend_from_slice(&self.shape.sizes);
 
-        let y = pad
+        let mut y = pad
             .iter()
-            .rev()
+            //.rev()
             .enumerate()
-            .fold(x.clone(), |y, (dim_size, &axis)| {
+            .fold(x.clone(), |y, (axis, &dim_size)| {
                 if dim_size == 1 {
-                    y.sum_axis(axis as isize)
+                    y.sum_axis(axis as isize).expand_dims(axis as isize)
                 } else {
                     y
                 }
             });
+
+        for _ in 0..(x.rank()-self.shape.ndim()) {
+            y = y.squeeze(0);
+        }
 
         y
     }
@@ -351,7 +369,7 @@ impl Op for MatVec {
         // gy: (*, A)
 
         // (*, A, B) = (*, A, 1) (*, 1, B)
-        let gx0 = matmul(gy, &transpose(x1));
+        let gx0 = matmul(&expand_dims(gy, gy.rank()), &expand_dims(x1, x1.rank() - 1));
 
         // (*, B) = (*, B, A) (*, A)
         let gx1 = matvec(&transpose(x0), gy);
@@ -381,12 +399,57 @@ impl Op for Transpose {
         }
     }
 
-    fn backward(&self, x: &[&Var], _gy: &Var) -> Vec<Var> {
-        let x = x[0];
-        let gx = transpose(x);
+    fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
+        let gx = transpose(gy);
         vec![gx]
     }
 }
+
+
+impl Op for ExpandDims {
+    fn compute(&self, x: &[&Tensor]) -> Tensor {
+        let x = x[0];
+        x.expand_dims(self.axis as isize)
+    }
+
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
+        let x = x[0];
+        let mut dim = x.shape().into_dimension();
+        dim.add(self.axis, 1);
+        Ok(dim)
+    }
+
+    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var> {
+        let gx = squeeze(gy, self.axis);
+        vec![gx]
+    }
+}
+
+
+impl Op for Squeeze {
+    fn compute(&self, x: &[&Tensor]) -> Tensor {
+        let x = x[0];
+        x.squeeze(self.axis as isize)
+    }
+
+    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError> {
+        let x = x[0];
+        let mut dim = x.shape().into_dimension();
+
+        if dim[self.axis] == 1 {
+            dim.remove(self.axis);
+            Ok(dim)
+        } else {
+            Err(ShapeError::new("cannot squeeze non-one dim"))
+        }
+    }
+
+    fn backward(&self, _x: &[&Var], gy: &Var) -> Vec<Var> {
+        let gx = expand_dims(gy, self.axis);
+        vec![gx]
+    }
+}
+
 
 impl Op for ReLU {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
@@ -438,7 +501,7 @@ impl Op for Softmax {
         let mut y: Tensor = x - max;
         y.mapv_inplace(|x| x.exp());
 
-        let sum = y.sum_axis(self.axis as isize);
+        let sum = y.sum_axis(self.axis as isize).expand_dims(self.axis as isize);
         y / sum
     }
 
@@ -457,6 +520,7 @@ impl Op for Softmax {
         vec![gx]
     }
 }
+
 // (N, C) (N, C) -> (N)
 impl Op for SoftmaxCrossEntropy {
     fn compute(&self, x: &[&Tensor]) -> Tensor {
@@ -464,6 +528,7 @@ impl Op for SoftmaxCrossEntropy {
         let t = x[1];
 
         let log_z = x0.log_sum_exp(1);
+
         let log_p = log_z * t;
         -log_p.sum_axis(1)
     }
@@ -560,6 +625,15 @@ pub fn matvec(x0: &Var, x1: &Var) -> Var {
 pub fn transpose(x: &Var) -> Var {
     op(Box::new(Transpose), &[x])
 }
+
+pub fn expand_dims(x: &Var, axis: usize) -> Var {
+    op(Box::new(ExpandDims { axis }), &[x])
+}
+
+pub fn squeeze(x: &Var, axis: usize) -> Var {
+    op(Box::new(Squeeze { axis }), &[x])
+}
+
 
 pub fn relu(x: &Var) -> Var {
     op(Box::new(ReLU { inplace: false }), &[x])

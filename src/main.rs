@@ -33,7 +33,7 @@ fn main() {
         "./data/train-images.idx3-ubyte",
         "./data/train-labels.idx1-ubyte",
     )
-    .unwrap();
+        .unwrap();
 
     // Model
     let model = Sequential::from(vec![
@@ -52,18 +52,17 @@ fn main() {
 
     println!("MNIST training started!");
 
-    for (images, labels) in mnist.iter().batch(10, Mnist::collate) {
+    for (images, labels) in mnist.iter().batch(32, Mnist::collate) {
         let input = Var::from_tensor(images);
         let labels = Var::from_tensor(labels);
-
-        println!("{:?}", input.shape());
-        println!("{:?}", labels.shape());
 
         let logits = model.pass(&input);
         let loss = op::softmax_cross_entropy(&logits, &labels);
 
         let params = model.params().unwrap();
         let grads = diff(&loss, &params);
+
+        println!("loss: {}", loss.data().sum() / 32.0);
 
         optimizer.update(grads);
     }
@@ -77,4 +76,32 @@ fn main() {
     // * Evaluating higher-order derivatives *
 
     println!("Hello, world!");
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tensor::Tensor;
+    use crate::op::{matvec, sum_to};
+
+
+    #[test]
+    fn test_grad() {
+        let a = Var::from_tensor(Tensor::randn([2, 3]));
+        let b = Var::from_tensor(Tensor::randn([4, 2, 3]));
+
+        let c = &a + &b;
+
+        let grads = diff(&c, &[&a, &b]);
+
+        let grad_a = grads.get(&a).unwrap();
+        let grad_b = grads.get(&b).unwrap();
+
+        println!("{:?}", c.data());
+        println!("{:?}", grad_a.data());
+
+        assert_eq!(grad_a.shape(), a.shape());
+        assert_eq!(grad_b.shape(), b.shape());
+    }
 }
