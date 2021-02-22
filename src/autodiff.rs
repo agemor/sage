@@ -7,43 +7,141 @@ use std::rc::{Rc, Weak};
 
 use std::time::Duration;
 
-use crate::op;
+use crate::ops;
 use crate::session::Session;
 use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
 use crate::tensor::Tensor;
 use std::ops::Deref;
 use itertools::Itertools;
+use crate::shape::{ToShape, Shape};
 
-pub trait Op {
-    fn compute(&self, x: &[&Tensor]) -> Tensor;
+pub trait Operator<const Arity: usize> {
+    fn compute(&self, x: [&Tensor; Arity]) -> Tensor;
 
-    fn forward(&self, x: &[&Var]) -> Result<Dim, ShapeError>;
+    fn forward(self, x: [&Var; Arity]) -> Var;
 
-    fn mem_req(&self) -> usize {
-        mem::size_of::<f32>()
-    }
 
     // f(x) = u
     // f'(x) -> ∂u/∂x
     // f'(x) * gy = ∂u/∂x * ∂y/∂u = ∂y/∂x
-    fn backward(&self, x: &[&Var], gy: &Var) -> Vec<Var>;
+    fn backward(&self, x: [&Var; Arity], gy: &Var) -> [Var; Arity];
+
+
+    fn mem_req(&self) -> usize {
+        mem::size_of::<f32>()
+    }
 }
 
-// Create a tensor operation
-pub fn op(op: Box<dyn Op>, args: &[&Var]) -> Var {
-    match op.forward(args) {
-        Ok(shape) => {
-            let out = Var::with_shape(shape.clone());
-            let op_node = OpNode::new(op, args, &out);
+pub struct Operation<const Arity: usize> {
+    operator: Box<dyn Operator<{ Arity }>>,
+    order: usize,
 
-            out.node_mut().parent = Some(op_node);
-            out
+    input: [Var; Arity],
+    output: WeakVar, // to prevent cyclic references
+}
+
+
+impl<const Arity: usize> Operation<{ Arity }> {
+    pub fn new<O>(operator: O, input: [Var; Arity], output: Var) -> Self
+        where O: Operator<{ Arity }>
+    {
+        let order = input
+            .iter()
+            .map(|a| a.node().order()) // each rank
+            .max() // get max rank in parent gen
+            .unwrap()
+            + 1; // increase + 1
+
+        Operation {
+            operator: Box::new(operator),
+            order,
+            input,
+            output: output.to_weak(),
         }
-        Err(err) => {
-            panic!(err.msg)
+    }
+
+    pub fn compute(&self) -> Tensor {
+        let data = self.input.each_ref().map(|v| v.data());
+        let data_borrowed = data.each_ref().map(|t| t.deref());
+        self.operator.compute(data_borrowed)
+    }
+
+    pub fn mem_req(&self) -> usize {
+        self.operator.mem_req()
+    }
+
+    pub fn input(&self) -> [Var; Arity] {
+        self.input.clone()
+    }
+
+    pub fn output(&self) -> Var {
+        self.output.to_var().unwrap()
+    }
+
+    pub fn input_adjoint(&self, output_adjoint: &Var) -> [Var; Arity] {
+        let input = self.input.each_ref();
+        self.operator.backward(input, output_adjoint)
+    }
+}
+
+
+pub enum OperationEnum {
+    Unary(Operation<1>),
+    Binary(Operation<2>),
+}
+
+// TODO: write some macros
+impl OperationEnum {
+    pub fn arity(&self) -> usize {
+        match self {
+            Self::Unary(_) => { 1 }
+            Self::Binary(_) => { 2 }
+        }
+    }
+
+    pub fn order(&self) -> usize {
+        match self {
+            Self::Unary(o) => { o.order }
+            Self::Binary(o) => { o.order }
+        }
+    }
+
+    pub fn compute(&self) -> Tensor {
+        match self {
+            Self::Unary(o) => { o.compute() }
+            Self::Binary(o) => { o.compute() }
+        }
+    }
+
+    pub fn mem_req(&self) -> usize {
+        match self {
+            Self::Unary(o) => { o.mem_req() }
+            Self::Binary(o) => { o.mem_req() }
+        }
+    }
+
+    pub fn input(&self) -> Vec<Var> { // TODO: change it to smallvec for better performance
+        match self {
+            Self::Unary(o) => { o.input.to_vec() }
+            Self::Binary(o) => { o.input.to_vec() }
+        }
+    }
+
+    pub fn output(&self) -> Option<Var> {
+        match self {
+            Self::Unary(o) => { o.output.to_var() }
+            Self::Binary(o) => { o.output.to_var() }
+        }
+    }
+
+    pub fn input_adjoint(&self, output_adjoint: &Var) -> Vec<Var> {
+        match self {
+            Self::Unary(o) => { o.input_adjoint(output_adjoint).to_vec() }
+            Self::Binary(o) => { o.input_adjoint(output_adjoint).to_vec() }
         }
     }
 }
+
 
 // Differentiate variables, a.k.a. backpropagation
 pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
@@ -51,8 +149,7 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
     let mut grads = HashMap::<Var, Var>::new();
 
     // The 'genesis' gy/gy, (which always equals to 1)
-    grads.insert(y.clone(), Var::from_tensor(Tensor::ones(y.shape())));
-
+    grads.insert(y.clone(), Var::with_data(Tensor::ones(y.shape())));
     queue.push(y.clone().into_ranked());
 
     while !queue.is_empty() {
@@ -60,20 +157,19 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
         let var = queue.pop().unwrap().into_inner();
         let var_node = var.node();
 
-        if let Some(ref parent) = var_node.parent {
-            let y = parent.output_var().unwrap(); // == var.clone()
-            let x = parent.input_vars();
+        let y = var;
+        let gy = grads.get(&y).unwrap();
 
-            let gy = grads.get(&y).unwrap(); // must unwrap
-            let gx = parent.op.backward(&x.iter().collect::<Vec<&Var>>(), gy);
+        if let Some(ref operation) = var_node.origin {
+            let x = operation.input();
+            let gx = operation.input_adjoint(gy);
 
-            // dispatch each x
-            for (x, gx) in x.into_iter().zip(gx) {
-                // update gradients
+            // insert (x, gx) pairs into grads hashmap
+            for (x, gx) in x.iter().zip(gx.iter()) {
                 grads
                     .entry(x.clone())
-                    .and_modify(|v| *v = op::add(v, &gx))
-                    .or_insert(gx); // new
+                    .and_modify(|v| *v = ops::add(v, gx))
+                    .or_insert(gx.clone());
 
                 queue.push(x.into_ranked())
             }
@@ -91,45 +187,6 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
     grads
 }
 
-pub struct OpNode {
-    pub(crate) op: Box<dyn Op>,
-
-    // Generation rank, required for topological ordering of computational nodes
-    rank: usize,
-
-    input: Vec<Rc<RefCell<VarNode>>>,
-    output: Weak<RefCell<VarNode>>,
-}
-
-impl OpNode {
-    fn new(op: Box<dyn Op>, input: &[&Var], output: &Var) -> Self {
-        let rank = input
-            .iter()
-            .map(|a| a.node().rank()) // each rank
-            .max() // get max rank in parent gen
-            .unwrap()
-            + 1; // increase + 1
-
-        OpNode {
-            op,
-            rank,
-            input: input.iter().map(|e| e.node.clone()).collect(),
-            output: Rc::downgrade(&output.node),
-        }
-    }
-
-    pub(crate) fn input_vars(&self) -> Vec<Var> {
-        self.input
-            .iter()
-            .map(|e| Var::from_node(e.clone()))
-            .collect()
-    }
-
-    fn output_var(&self) -> Option<Var> {
-        self.output
-            .upgrade().map(Var::from_node)
-    }
-}
 
 pub struct RuntimeProfile {
     pub mem_store: usize,
@@ -139,18 +196,18 @@ pub struct RuntimeProfile {
 
 pub struct VarNode {
     pub data: Option<Tensor>,
-    pub shape: Dim,
-    pub parent: Option<OpNode>,
+    pub shape: Shape,
+    pub origin: Option<OperationEnum>,
 
     // memory/time profile
     pub runtime: Option<RuntimeProfile>,
 }
 
 impl VarNode {
-    fn rank(&self) -> usize {
-        match &self.parent {
+    fn order(&self) -> usize {
+        match &self.origin {
             None => 0,
-            Some(n) => n.rank,
+            Some(o) => o.order(),
         }
     }
 
@@ -166,13 +223,12 @@ impl VarNode {
 
     // get re-computation cost, in a dynamic-programming fashion.
     fn recompute_time(&self) -> Duration {
-        if let Some(ref parent) = self.parent {
+        if let Some(ref operation) = self.origin {
             let mut time = Duration::new(0, 0);
             let mut stack = Vec::<Var>::new();
 
-            if let Some(var) = parent.output_var() {
-                stack.push(var);
-            }
+            // must unwrap. "I, myself is the proof"
+            stack.push(operation.output().unwrap());
 
             // start with self..
             while !stack.is_empty() {
@@ -185,14 +241,10 @@ impl VarNode {
 
                 time += runtime.call_time;
 
-                if let Some(ref parent) = var_node.parent {
-                    let in_vars = parent.input_vars();
-
-                    for in_var in in_vars.iter() {
-                        // needs re-computation
-
-                        if !in_var.is_evaluated() {
-                            stack.push(in_var.clone())
+                if let Some(ref operation) = var_node.origin {
+                    for v in operation.input() {
+                        if !v.is_evaluated() {
+                            stack.push(v)
                         }
                     }
                 }
@@ -210,22 +262,20 @@ impl VarNode {
 }
 
 pub struct Var {
-    shape: Dim,
     node: Rc<RefCell<VarNode>>,
 }
 
 impl Var {
-    pub fn with_shape<D>(shape: D) -> Var
-        where
-            D: IntoDimension,
+    /////// Var constructors ///////
+
+    pub fn with_shape<S>(s: S) -> Var
+        where S: ToShape,
     {
-        let dim = shape.into_dimension();
         Var {
-            shape: dim.clone(),
             node: Rc::new(RefCell::new(VarNode {
                 data: None,
-                shape: dim,
-                parent: None,
+                shape: s.to_shape(),
+                origin: None,
                 runtime: Some(RuntimeProfile {
                     mem_store: 0,
                     call_time: Duration::ZERO,
@@ -234,12 +284,11 @@ impl Var {
         }
     }
 
-    pub fn from_tensor(data: Tensor) -> Var {
+    pub fn with_data(data: Tensor) -> Var {
         Var {
-            shape: Dim::new(data.shape()),
             node: Rc::new(RefCell::new(VarNode {
-                shape: Dim::new(data.shape()),
-                parent: None,
+                shape: data.shape(),
+                origin: None,
                 runtime: Some(RuntimeProfile {
                     mem_store: data.mem_size(),
                     call_time: Duration::ZERO,
@@ -249,32 +298,73 @@ impl Var {
         }
     }
 
-    pub(crate) fn into_ranked(self) -> Ranked<Self> {
-        let rank = self.node().rank();
+    fn from_node(node: Rc<RefCell<VarNode>>) -> Var {
+        Var { node }
+    }
+
+    /////// Var constructors (from operation) ///////
+
+
+    pub fn from_unary_op<S, O>(shape: S, operator: O, arg: &Var) -> Self
+        where S: ToShape,
+              O: Operator<1>
+    {
+        let var = Var::with_shape(shape);
+
+        let input = [arg.clone()];
+        let output = var.clone();
+
+        let operation = Operation::new(operator, input, output);
+        var.node_mut().origin = Some(OperationEnum::Unary(operation));
+        var
+    }
+
+    pub fn from_binary_op<S, O>(shape: S, operator: O, args: [&Var; 2]) -> Self
+        where S: ToShape,
+              O: Operator<2>
+    {
+        let var = Var::with_shape(shape);
+
+        let input = [args[0].clone(), args[1].clone()];
+        let output = var.clone();
+
+        let operation = Operation::new(operator, input, output);
+
+        var.node_mut().origin = Some(OperationEnum::Binary(operation));
+        var
+    }
+
+    /////// Var converters ///////
+
+
+    pub fn into_ranked(self) -> Ranked<Self> {
+        let rank = self.node().order();
 
         Ranked { inner: self, rank }
     }
 
-    pub(crate) fn node(&self) -> Ref<VarNode> {
+    pub fn to_weak(&self) -> WeakVar {
+        WeakVar::from(self)
+    }
+
+
+    /////// Node accesses ///////
+
+    pub fn node(&self) -> Ref<VarNode> {
         RefCell::borrow(&self.node)
     }
 
-    pub(crate) fn node_mut(&self) -> RefMut<VarNode> {
+    pub fn node_mut(&self) -> RefMut<VarNode> {
         RefCell::borrow_mut(&self.node)
     }
 
-    fn from_node(node: Rc<RefCell<VarNode>>) -> Var {
-        let n = RefCell::borrow(&node).shape.clone();
-
-        Var { shape: n, node }
-    }
 
     pub fn is_evaluated(&self) -> bool {
         let node = self.node();
         node.data.is_some()
     }
 
-    pub fn data_unchecked(&self) -> Ref<Tensor> {
+    fn data_unchecked(&self) -> Ref<Tensor> {
         let node = self.node();
         Ref::map(node, |x| match x.data {
             None => panic!("unevaluated data!"),
@@ -285,7 +375,7 @@ impl Var {
     // retrieve tensor, evaluate if does not have one.
     pub fn data(&self) -> Ref<Tensor> {
         if !self.is_evaluated() {
-            let mut session = Session::with_budget(vec![self.clone()], 0);
+            let mut session = Session::with_budget(vec![self.clone()], 10000);
             session.eval();
         }
 
@@ -293,18 +383,18 @@ impl Var {
     }
 
     pub fn rank(&self) -> usize {
-        self.shape.ndim()
+        self.node().shape.len()
     }
 
-    pub fn shape(&self) -> &[usize] {
-        &self.shape.sizes
+    pub fn shape(&self) -> Shape {
+        self.node().shape
     }
 
     pub fn update_grads(&self, grad: Tensor) {
         let mut node = self.node_mut();
         let param = node.data.as_ref().unwrap();
 
-        let new_param = (param - grad);//.mean_axis(0);
+        let new_param = (param - grad);
 
         node.data = Some(new_param);
     }
@@ -326,7 +416,6 @@ impl PartialEq for Var {
 impl Clone for Var {
     fn clone(&self) -> Self {
         Var {
-            shape: self.shape.clone(),
             node: self.node.clone(),
         }
     }
@@ -337,6 +426,29 @@ impl Hash for Var {
         self.node.as_ptr().hash(state)
     }
 }
+
+impl AsRef<Var> for Var {
+    fn as_ref(&self) -> &Var {
+        self
+    }
+}
+
+struct WeakVar {
+    node: Weak<RefCell<VarNode>>
+}
+
+impl WeakVar {
+    fn from(var: &Var) -> Self {
+        WeakVar { node: Rc::downgrade(&var.node) }
+    }
+
+    fn to_var(&self) -> Option<Var> {
+        self.node.upgrade().map(|x| {
+            Var::from_node(x)
+        })
+    }
+}
+
 
 pub struct Ranked<T> {
     inner: T,

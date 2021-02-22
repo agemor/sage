@@ -87,7 +87,7 @@ impl<'a> Iterator for AlongAxisIter<'a> {
     type Item = Tensor;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.t.dim[self.axis] {
+        if self.index < self.t.shape[self.axis] {
             self.index += 1;
             Some(self.t.index_axis((self.index - 1) as isize, self.axis as isize))
         } else {

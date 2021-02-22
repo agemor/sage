@@ -38,23 +38,22 @@ impl Session {
 
             // if not evaluated...
             if !var.is_evaluated() {
-                let mut var_node = var.node_mut();
+                let mut node = var.node_mut();
 
                 // must unwrap, as a node must have either data or parent.
-                let parent = var_node.parent.as_ref().unwrap();
+                let op = node.origin.as_ref().unwrap();
 
-                let unevaluated = parent
-                    .input_vars()
+                let unevaluated = op
+                    .input()
                     .into_iter()
                     .filter(|v| !v.is_evaluated())
                     .collect::<Vec<Var>>();
 
                 // ready to evaluate!
                 if unevaluated.is_empty() {
-                    let in_vars = parent.input_vars();
 
                     // exceeds mem budget?
-                    if parent.op.mem_req() > self.mem_budget {
+                    if op.mem_req() > self.mem_budget {
                         // Let's start with something basic.
                         //self.collect_garbage();
 
@@ -62,28 +61,18 @@ impl Session {
                         // self.greedy_drop(&in_vars, parent.op.mem_req());
                     }
 
-                    let in_tensors = in_vars
-                        .iter()
-                        .map(|v| v.data_unchecked())
-                        .collect::<Vec<Ref<Tensor>>>();
-
-                    let in_tensors2 = in_tensors
-                        .iter()
-                        .map(|v| v.deref())
-                        .collect::<Vec<&Tensor>>();
-
                     // do some runtime profiling
                     let timer = Instant::now();
 
-                    let out_tensor = parent.op.compute(&in_tensors2);
+                    let data = op.compute();
 
                     let profile = RuntimeProfile {
-                        mem_store: out_tensor.mem_size(),
+                        mem_store: data.mem_size(),
                         call_time: timer.elapsed(),
                     };
 
-                    var_node.data = Some(out_tensor);
-                    var_node.runtime = Some(profile);
+                    node.data = Some(data);
+                    node.runtime = Some(profile);
 
                     self.resolved.insert(var.clone());
 
@@ -118,14 +107,14 @@ impl Session {
 
             while !stack.is_empty() {
                 let var = stack.pop().unwrap();
-                let var_node = var.node();
+                let node = var.node();
 
                 if !var.is_evaluated() {
                     // if this var is new to the dependency set,
                     if required.insert(var.clone()) {
                         // add its ancestors.
-                        if let Some(ref p) = var_node.parent {
-                            stack.extend(p.input_vars())
+                        if let Some(ref op) = node.origin {
+                            stack.extend(op.input())
                         }
                     }
                 }

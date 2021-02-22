@@ -5,6 +5,9 @@
 #![feature(hash_drain_filter)]
 #![feature(is_sorted)]
 #![feature(const_generics)]
+#![feature(array_methods)]
+#![feature(drain_filter)]
+#![feature(array_map)]
 
 #[macro_use]
 extern crate impl_ops;
@@ -20,12 +23,11 @@ mod autodiff;
 mod data;
 mod layers;
 mod mnist;
-mod net;
-mod op;
+mod ops;
 mod optimizers;
 mod tensor;
-mod utils;
 mod session;
+mod shape;
 
 fn main() {
     // Load dataset
@@ -53,11 +55,11 @@ fn main() {
     println!("MNIST training started!");
 
     for (images, labels) in mnist.iter().batch(32, Mnist::collate) {
-        let input = Var::from_tensor(images);
-        let labels = Var::from_tensor(labels);
+        let input = Var::with_data(images);
+        let labels = Var::with_data(labels);
 
-        let logits = model.pass(&input);
-        let loss = op::softmax_cross_entropy(&logits, &labels);
+        let logits = model.forward(&input);
+        let loss = ops::softmax_cross_entropy(&logits, &labels);
 
         let params = model.params().unwrap();
         let grads = diff(&loss, &params);
@@ -83,13 +85,13 @@ fn main() {
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-    use crate::op::{matvec, sum_to};
+    use crate::ops::{matvec, sum_to};
 
 
     #[test]
     fn test_grad() {
-        let a = Var::from_tensor(Tensor::randn([2, 3]));
-        let b = Var::from_tensor(Tensor::randn([4, 2, 3]));
+        let a = Var::with_data(Tensor::randn([2, 3]));
+        let b = Var::with_data(Tensor::randn([4, 2, 3]));
 
         let c = &a + &b;
 

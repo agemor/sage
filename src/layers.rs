@@ -2,12 +2,12 @@ pub mod activations;
 pub mod loss;
 
 use crate::autodiff::Var;
-use crate::{op, tensor};
+use crate::{ops, tensor};
 use crate::tensor::Tensor;
 
 pub trait Layer {
     fn init(&self);
-    fn pass(&self, x: &Var) -> Var;
+    fn forward(&self, x: &Var) -> Var;
     fn params(&self) -> Option<Vec<&Var>>;
 }
 
@@ -36,10 +36,10 @@ impl Layer for Sequential {
         }
     }
 
-    fn pass(&self, x: &Var) -> Var {
+    fn forward(&self, x: &Var) -> Var {
         self.layers
             .iter()
-            .fold(x.clone(), |x, layer| layer.pass(&x))
+            .fold(x.clone(), |x, layer| layer.forward(&x))
     }
 
     fn params(&self) -> Option<Vec<&Var>> {
@@ -78,8 +78,8 @@ impl Layer for Affine {
             .set_data(Tensor::zeros(self.bias.shape()));
     }
 
-    fn pass(&self, x: &Var) -> Var {
-        op::matvec(&self.kernel, x) + &self.bias
+    fn forward(&self, x: &Var) -> Var {
+        ops::matvec(&self.kernel, x) + &self.bias
     }
 
     fn params(&self) -> Option<Vec<&Var>> {

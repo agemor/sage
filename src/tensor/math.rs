@@ -1,52 +1,80 @@
 use crate::tensor::{to_unsigned_index, Tensor};
+use crate::shape::{ToShape, ToIndex};
 
 impl Tensor {
     pub fn sum(&self) -> f32 {
         self.logical_iter().sum()
     }
 
-    pub fn max_axis(&self, axis: isize) -> Tensor {
-        // wow!
-        self.fold_axis(axis, f32::MIN, |&a, &b| if a > b { a } else { b })
+    pub fn mean(&self) -> f32 {
+        self.logical_iter().sum() / (self.size() as f32)
     }
 
-    pub fn sum_axis(&self, axis: isize) -> Tensor {
-        let axis_u = to_unsigned_index(axis, self.rank());
+    pub fn max_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
+        where I: ToIndex
+    {
+        let max = self.fold_axis(&axis, f32::MIN, |&a, &b| if a > b { a } else { b });
+        if retain_axis {
+            max.expand_dims(axis)
+        } else {
+            max
+        }
+    }
 
-        let mut res_dim = self.dim.clone();
-        res_dim.remove(axis_u);
-        let mut res = Tensor::zeros(res_dim);
+    pub fn sum_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
+        where I: ToIndex
+    {
+        let axis = axis.to_index(self.rank());
+
+        let mut new_shape = self.shape;
+        new_shape.remove(axis);
+
+        let mut summed = Tensor::zeros(new_shape);
 
         for t in self.along_axis(axis) {
-            res = res + t;
+            summed = summed + t;
         }
-        res
+
+        if retain_axis {
+            summed.expand_dims(axis)
+        } else {
+            summed
+        }
     }
 
-    pub fn mean_axis(&self, axis: isize) -> Tensor {
-        let axis_u = to_unsigned_index(axis, self.rank());
-
-        self.sum_axis(axis) / self.dim[axis_u] as f32
+    pub fn mean_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
+        where I: ToIndex
+    {
+        let axis = axis.to_index(self.rank());
+        self.sum_axis(axis, retain_axis) / self.shape[axis] as f32
     }
 
-    pub fn softmax(&self, axis: isize) -> Tensor {
-        let max = self.max_axis(axis).expand_dims(axis);
+    pub fn softmax<I>(&self, axis: I) -> Tensor
+        where I: ToIndex
+    {
+        let axis = axis.to_index(self.rank());
+
+        let max = self.max_axis(axis, true);
 
         // for numerical stability
         let mut y = self - max;
         y.mapv_inplace(|x| x.exp());
 
-        let sum = y.sum_axis(axis);
+        let sum = y.sum_axis(axis, true);
         y / sum
     }
 
-    pub fn log_sum_exp(&self, axis: isize) -> Tensor {
-        let max = self.max_axis(axis).expand_dims(axis);
+    pub fn log_sum_exp<I>(&self, axis: I) -> Tensor
+        where I: ToIndex
+    {
+        let axis = axis.to_index(self.rank());
+
+        let max = self.max_axis(axis, true);
 
         let mut y = self - &max;
 
         y.mapv_inplace(|x| x.exp());
-        let mut sum = y.sum_axis(axis).expand_dims(axis);
+        let mut sum = y.sum_axis(axis, true);
         sum.mapv_inplace(move |x| x.ln());
 
         sum + max
@@ -101,7 +129,7 @@ mod test {
         let c = Tensor::cat(&[a, b], 1).unwrap();
 
         assert_eq!(
-            c.max_axis(1).expand_dims(1),
+            c.max_axis(1, true),
             Tensor::from_elem([3, 1, 5], 10.0)
         );
     }
@@ -110,7 +138,7 @@ mod test {
     fn test_sum_axis() {
         let a = Tensor::randn([3, 5, 7]);
 
-        assert_eq!(a.sum_axis(1).shape(), &[3, 7]);
-        assert_eq!(a.sum_axis(-1), a.fold_axis(-1, 0.0, |&a, &b| a + b));
+        assert_eq!(a.sum_axis(1, false).shape(), [3, 7].to_shape());
+        assert_eq!(a.sum_axis(-1, false), a.fold_axis(-1, 0.0, |&a, &b| a + b));
     }
 }
