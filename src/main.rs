@@ -25,9 +25,9 @@ mod layers;
 mod mnist;
 mod ops;
 mod optimizers;
-mod tensor;
 mod session;
 mod shape;
+mod tensor;
 
 fn main() {
     // Load dataset
@@ -35,24 +35,23 @@ fn main() {
         "./data/train-images.idx3-ubyte",
         "./data/train-labels.idx1-ubyte",
     )
-        .unwrap();
+    .unwrap();
 
     // Model
     let model = Sequential::from(vec![
         box Affine::new(784, 128),
         box Relu,
         box Affine::new(128, 10),
-        box Relu,
     ]);
 
     // Optimizer
-    let optimizer = optimizers::Sgd::new(0.0001);
+    let optimizer = optimizers::Sgd::new(0.001);
 
     // Initialize model weights and optimizer params
     model.init();
     optimizer.init();
 
-    println!("MNIST training started!");
+    println!("Training started!");
 
     for (images, labels) in mnist.iter().batch(32, Mnist::collate) {
         let input = Var::with_data(images);
@@ -65,6 +64,7 @@ fn main() {
         let grads = diff(&loss, &params);
 
         println!("loss: {}", loss.data().mean());
+        println!("accuracy: {}", accuracy(&logits, &labels));
 
         optimizer.update(grads);
     }
@@ -80,12 +80,28 @@ fn main() {
     println!("Hello, world!");
 }
 
+fn accuracy(logits: &Var, labels: &Var) -> f32 {
+    let logits = logits.data().argmax(1);
+    let labels = labels.data().argmax(1);
+
+    let mut correct = 0;
+
+    logits
+        .logical_iter()
+        .zip(labels.logical_iter())
+        .for_each(|(&a, &b)| {
+            if (a - b).abs() < 0.001 {
+                correct += 1;
+            }
+        });
+
+    correct as f32 / logits.size() as f32
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-
 
     #[test]
     fn test_grad() {

@@ -3,17 +3,18 @@
 use std::cell::UnsafeCell;
 use std::fmt::Formatter;
 use std::rc::Rc;
-use std::{fmt, ops, slice};
+use std::{fmt, ops, ptr, slice};
 
 use itertools::{zip, Itertools};
 use ndarray::ShapeBuilder;
 use rand::distributions::Distribution;
-use rand::rngs::SmallRng;
-use rand::{thread_rng, SeedableRng};
+use rand::thread_rng;
 use rand_distr::Normal;
 
+use crate::shape::{Shape, ShapeError, ToIndex, ToShape};
 use crate::tensor::iter::{AlongAxisIter, Iter, IterMut};
-use crate::shape::{Shape, ToShape, ShapeError, ToIndex};
+
+use matrixmultiply;
 
 pub mod init;
 pub mod iter;
@@ -106,13 +107,15 @@ impl Tensor {
 
     // constructors
     pub fn from_slice<S>(shape: S, slice: &[f32]) -> Self
-        where S: ToShape
+    where
+        S: ToShape,
     {
         Tensor::from_vec(shape, slice.to_vec())
     }
 
     pub fn from_vec<S>(shape: S, v: Vec<f32>) -> Self
-        where S: ToShape,
+    where
+        S: ToShape,
     {
         // materialization of shape
         let shape = shape.to_shape();
@@ -131,10 +134,10 @@ impl Tensor {
         }
     }
 
-
     // Create tensor from single element
     pub fn from_elem<S>(shape: S, elem: f32) -> Self
-        where S: ToShape,
+    where
+        S: ToShape,
     {
         let shape = shape.to_shape();
         let v = vec![elem; shape.size()];
@@ -143,16 +146,17 @@ impl Tensor {
 
     // Create tensor from the given distribution
     pub fn from_dist<S, T>(shape: S, dist: T) -> Tensor
-        where S: ToShape,
-              T: Distribution<f32>,
+    where
+        S: ToShape,
+        T: Distribution<f32>,
     {
         let shape = shape.to_shape();
 
         let mut v = Vec::<f32>::with_capacity(shape.size());
-        let rng = &mut SmallRng::from_rng(thread_rng()).unwrap();
+        let mut rng = thread_rng(); //&mut SmallRng::from_rng(thread_rng()).unwrap();
 
         for _ in 0..shape.size() {
-            v.push(dist.sample(rng));
+            v.push(dist.sample(&mut rng));
         }
 
         Tensor::from_vec(shape, v)
@@ -161,17 +165,28 @@ impl Tensor {
     // private
     fn from_ndarray(ndarray: ndarray::ArrayD<f32>) -> Self {
         let shape = ndarray.shape().to_shape();
+        let strides = ndarray
+            .strides()
+            .iter()
+            .map(|x| *x as usize)
+            .collect::<Vec<usize>>();
+
         let vec = ndarray.into_raw_vec();
-        Tensor::from_vec(shape, vec) // must unwrap
+
+        // gather ndarray strides and apply those strides to resulting tensor
+        let mut t = Tensor::from_vec(shape, vec);
+        t.strides = strides;
+
+        t
     }
 
     pub fn scalar(v: f32) -> Self {
         Tensor::from_elem([1], v)
     }
 
-
     fn view<S>(orig: &Tensor, shape: S, strides: &[usize], offset: usize) -> Tensor
-        where S: ToShape,
+    where
+        S: ToShape,
     {
         Tensor {
             shape: shape.to_shape(),
@@ -219,28 +234,49 @@ impl Tensor {
     ///////////////// init constructors /////////////////
 
     pub fn zeros<S>(shape: S) -> Tensor
-        where S: ToShape
+    where
+        S: ToShape,
     {
         Tensor::from_elem(shape, 0.0)
     }
 
     pub fn ones<S>(shape: S) -> Tensor
-        where S: ToShape
+    where
+        S: ToShape,
     {
         Tensor::from_elem(shape, 1.0)
     }
 
     // sample from standard normal dist
     pub fn randn<S>(shape: S) -> Tensor
-        where S: ToShape
+    where
+        S: ToShape,
     {
         Tensor::from_dist(shape, Normal::new(0.0, 1.0).unwrap())
     }
 
+    ///////////////// comparison /////////////////
+    pub fn equals(&self, tensor: &Tensor, eps: f32) -> bool {
+        let eq_map = self
+            .zip_map(
+                tensor,
+                |&a, &b| if (a - b).abs() <= eps { 0 } else { 1 } as f32,
+            )
+            .unwrap();
+
+        eq_map.is_zero()
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.logical_iter().all(|&x| x == 0.0)
+    }
+
     ///////////////// index, slice, join /////////////////
+
     // * Creates new tensor
     pub fn cat<I>(tensors: &[Tensor], axis: I) -> Result<Tensor, ShapeError>
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(tensors[0].rank());
 
@@ -261,7 +297,8 @@ impl Tensor {
 
     // * Creates new tensor
     pub fn stack<I>(tensors: &[Tensor], axis: I) -> Result<Tensor, ShapeError>
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         if !tensors.iter().map(|e| e.shape).all_equal() {
             panic!("all tensors should be in the same shape");
@@ -282,7 +319,8 @@ impl Tensor {
     }
 
     pub fn squeeze<I>(&self, axis: I) -> Tensor
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.rank());
 
@@ -299,7 +337,8 @@ impl Tensor {
     }
 
     pub fn expand_dims<I>(&self, axis: I) -> Tensor
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         // allow unexisting index
         let axis = axis.to_index(self.rank() + 1);
@@ -321,7 +360,8 @@ impl Tensor {
 
     // reshape (underlying data does not change)
     pub fn reshape<S>(&self, shape: S) -> Result<Tensor, ShapeError>
-        where S: ToShape
+    where
+        S: ToShape,
     {
         let new_shape = shape.to_shape();
         let new_strides = Shape::default_strides(new_shape);
@@ -339,8 +379,9 @@ impl Tensor {
 
     // swap last two dims of tensor
     pub fn transpose<I, J>(&self, axis_a: I, axis_b: J) -> Tensor
-        where I: ToIndex,
-              J: ToIndex
+    where
+        I: ToIndex,
+        J: ToIndex,
     {
         let axis_a = axis_a.to_index(self.rank());
         let axis_b = axis_b.to_index(self.rank());
@@ -359,7 +400,8 @@ impl Tensor {
     }
 
     pub fn permute<I>(&self, axes: &[I]) -> Tensor
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axes = axes
             .iter()
@@ -388,8 +430,8 @@ impl Tensor {
     }
 
     pub fn upcast<S>(&self, shape: S) -> Result<Tensor, ShapeError>
-        where
-            S: ToShape,
+    where
+        S: ToShape,
     {
         let target_shape = shape.to_shape();
 
@@ -457,12 +499,12 @@ impl Tensor {
 
     /// make possible a[..][3][..] kind of operations.
     pub fn index_axis<I, J>(&self, index: I, axis: J) -> Tensor
-        where I: ToIndex,
-              J: ToIndex
+    where
+        I: ToIndex,
+        J: ToIndex,
     {
         let axis = axis.to_index(self.rank());
         let index = index.to_index(self.shape[axis]);
-
 
         // a = (10, 10, 10)
         // a[2]
@@ -490,16 +532,18 @@ impl Tensor {
 
     // single index.. unwraps first one.
     pub fn index<I>(&self, index: I) -> Tensor
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         self.index_axis(index, 0)
     }
 
     // make possible of a[..][2..3][..] kind of operations
     pub fn slice_axis<I, J, K>(&self, start_index: I, end_index: J, axis: K) -> Tensor
-        where I: ToIndex,
-              J: ToIndex,
-              K: ToIndex
+    where
+        I: ToIndex,
+        J: ToIndex,
+        K: ToIndex,
     {
         let axis = axis.to_index(self.rank());
 
@@ -509,7 +553,6 @@ impl Tensor {
         if start_index > end_index {
             panic!("start and end index are not in the order");
         }
-
 
         // a = (10, 10, 10)
         // a[2]
@@ -536,8 +579,9 @@ impl Tensor {
     }
 
     pub fn slice<I, J>(&self, start_index: I, end_index: J) -> Tensor
-        where I: ToIndex,
-              J: ToIndex
+    where
+        I: ToIndex,
+        J: ToIndex,
     {
         self.slice_axis(start_index, end_index, 0)
     }
@@ -561,13 +605,14 @@ impl Tensor {
 
         // if a_dim=2, b_dim =2 return matmul
         if rank_a == 2 && rank_b == 2 {
-            let a = self.to_ndarray();
-            let b = other.to_ndarray();
-
-            let a2d = a.into_dimensionality::<ndarray::Ix2>().unwrap();
-            let b2d = b.into_dimensionality::<ndarray::Ix2>().unwrap();
-            let c2d = a2d.dot(&b2d);
-            Tensor::from_ndarray(c2d.into_dyn())
+            // let a = self.to_ndarray();
+            // let b = other.to_ndarray();
+            //
+            // let a2d = a.into_dimensionality::<ndarray::Ix2>().unwrap();
+            // let b2d = b.into_dimensionality::<ndarray::Ix2>().unwrap();
+            // let c2d = a2d.dot(&b2d);
+            // Tensor::from_ndarray(c2d.into_dyn())
+            gemm(self, other)
         } else {
             // create a shared shape
             let (a_batch, a_mat) = self.shape.split(rank_a - 2);
@@ -607,16 +652,17 @@ impl Tensor {
     ////////// Iterator////////////
 
     pub fn along_axis<I>(&self, axis: I) -> AlongAxisIter
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.rank());
         AlongAxisIter::new(self, axis)
     }
 
     pub fn fold_axis<I, F>(&self, axis: I, init: f32, mut fold: F) -> Tensor
-        where
-            I: ToIndex,
-            F: FnMut(&f32, &f32) -> f32,
+    where
+        I: ToIndex,
+        F: FnMut(&f32, &f32) -> f32,
     {
         let axis_u = axis.to_index(self.rank());
 
@@ -626,7 +672,8 @@ impl Tensor {
 
         for t in self.along_axis(axis) {
             // wow!
-            folded.random_iter_mut()
+            folded
+                .random_iter_mut()
                 .zip(t.logical_iter())
                 .for_each(|(x, y)| {
                     *x = fold(x, y);
@@ -639,8 +686,8 @@ impl Tensor {
 
     // preserve original memory layout??
     pub fn map<F>(&self, f: F) -> Tensor
-        where
-            F: Fn(&f32) -> f32,
+    where
+        F: Fn(&f32) -> f32,
     {
         let v =
             // fast, contiguous iter
@@ -662,8 +709,8 @@ impl Tensor {
     }
 
     pub fn mapv_inplace<F>(&mut self, mut f: F)
-        where
-            F: FnMut(&f32) -> f32,
+    where
+        F: FnMut(&f32) -> f32,
     {
         if self.is_contiguous() {
             unsafe {
@@ -704,8 +751,8 @@ impl Tensor {
     }
 
     pub fn zip_map<F>(&self, other: &Tensor, f: F) -> Result<Tensor, ShapeError>
-        where
-            F: Fn(&f32, &f32) -> f32,
+    where
+        F: Fn(&f32, &f32) -> f32,
     {
         if let Ok(u) = Shape::union(self.shape, other.shape) {
             let a = self.upcast(&u).unwrap();
@@ -722,9 +769,7 @@ impl Tensor {
             Err(ShapeError::new("cannot broadcast!"))
         }
     }
-
 }
-
 
 impl Eq for Tensor {}
 
@@ -767,6 +812,45 @@ impl fmt::Debug for Tensor {
     }
 }
 
+fn gemm(a: &Tensor, b: &Tensor) -> Tensor {
+    let m = a.shape[0];
+    let k = a.shape[1];
+    let n = b.shape[1];
+
+    let mut v = Vec::with_capacity(m * n);
+
+    unsafe {
+        v.set_len(m * n);
+
+        // common parameters for gemm
+        let ap = a.arr().as_ptr().add(a.offset);
+        let bp = b.arr().as_ptr().add(b.offset);
+        let cp = v.as_mut_ptr();
+
+        let ast = a.strides();
+        let bst = b.strides();
+        let cst = Shape::default_strides([m, n]);
+
+        matrixmultiply::sgemm(
+            m,
+            k,
+            n,
+            1.0,
+            ap,
+            ast[0] as isize,
+            ast[1] as isize,
+            bp,
+            bst[0] as isize,
+            bst[1] as isize,
+            0.0,
+            cp,
+            cst[0] as isize,
+            cst[1] as isize,
+        );
+    }
+    Tensor::from_vec([m, n], v)
+}
+
 // let user know it is dangerous and might cause UD.
 
 // The reason we are not taking moved value is that,
@@ -802,18 +886,18 @@ mod tests {
     #[test]
     fn test_eq() {
         assert_eq!(
-            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12., ]),
-            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12., ])
+            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12.,]),
+            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12.,])
         );
 
         assert_ne!(
-            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12., ]),
-            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 13., ])
+            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12.,]),
+            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 13.,])
         );
 
         assert_ne!(
-            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12., ]),
-            Tensor::from_slice([1, 1, 1, 3, 2], &[1., 4., 6., 8., 10., 12., ])
+            Tensor::from_slice([1, 3, 2], &[1., 4., 6., 8., 10., 12.,]),
+            Tensor::from_slice([1, 1, 1, 3, 2], &[1., 4., 6., 8., 10., 12.,])
         );
     }
 
@@ -898,7 +982,13 @@ mod tests {
     fn test_from_ndarray() {}
 
     #[test]
-    fn test_data() {}
+    fn test_ndarray() {
+        let a = Tensor::randn([2, 3, 4]);
+        println!("{:?}", a.to_ndarray());
+
+        let b = a.transpose(-1, -2);
+        println!("{:?}", b.to_ndarray());
+    }
 
     #[test]
     fn test_shrink_if_possible() {}
@@ -916,14 +1006,20 @@ mod tests {
     fn test_cat() {
         let a = Tensor::ones([3, 2, 5]);
         let b = Tensor::ones([3, 2, 5]);
-        assert_eq!(Tensor::cat(&[a, b], 2).unwrap().shape(), [3, 2, 10].to_shape());
+        assert_eq!(
+            Tensor::cat(&[a, b], 2).unwrap().shape(),
+            [3, 2, 10].to_shape()
+        );
     }
 
     #[test]
     fn test_stack() {
         let a = Tensor::ones([3, 2, 5]);
         let b = Tensor::ones([3, 2, 5]);
-        assert_eq!(Tensor::stack(&[a, b], 2).unwrap().shape(), [3, 2, 2, 5].to_shape());
+        assert_eq!(
+            Tensor::stack(&[a, b], 2).unwrap().shape(),
+            [3, 2, 2, 5].to_shape()
+        );
     }
 
     #[test]
@@ -964,7 +1060,10 @@ mod tests {
         assert_eq!(a.upcast([3, 1, 9]).unwrap().shape(), [3, 1, 9].to_shape());
         assert_eq!(a.upcast([3, 1, 9]).unwrap(), Tensor::ones([3, 1, 9]));
 
-        assert_eq!(a.upcast([10, 3, 7, 9]).unwrap().shape(), [10, 3, 7, 9].to_shape());
+        assert_eq!(
+            a.upcast([10, 3, 7, 9]).unwrap().shape(),
+            [10, 3, 7, 9].to_shape()
+        );
         assert_eq!(
             a.upcast([10, 3, 7, 9]).unwrap(),
             Tensor::ones([10, 3, 7, 9])
@@ -996,7 +1095,8 @@ mod tests {
         let a = Tensor::ones([3, 1, 9]);
         a.along_axis(-1)
             .for_each(|t| assert_eq!(t.shape(), [3, 1].to_shape()));
-        a.along_axis(0).for_each(|t| assert_eq!(t.shape(), [1, 9].to_shape()));
+        a.along_axis(0)
+            .for_each(|t| assert_eq!(t.shape(), [1, 9].to_shape()));
     }
 
     #[test]
@@ -1010,14 +1110,24 @@ mod tests {
 
     #[test]
     fn test_matmul() {
-        let a = Tensor::from_slice([2, 2, 2], &[1., 2., 3., 4., 3., 4., 5., 6.]);
-
-        let b = Tensor::from_slice([2, 2], &[2., 0., 0., 2.]);
-
-        assert_eq!(
-            a.matmul(&b),
-            Tensor::from_slice([2, 2, 2], &[2., 4., 6., 8., 6., 8., 10., 12., ])
+        let a = Tensor::from_slice(
+            [3, 2, 3],
+            &[
+                -1.33820, -0.27636, -1.79478, -0.50638, -1.83333, -0.31560, 1.58321, 1.34656,
+                -1.13917, 1.21047, -1.21295, -1.94985, 0.32884, -0.65730, -0.34635, 1.41366,
+                -0.82830, -1.94889,
+            ],
         );
+
+        let b = Tensor::from_slice([3, 1], &[0.89976, -1.99751, 0.03085]);
+
+        let c = Tensor::from_slice(
+            [3, 2, 1],
+            &[-0.70741, 3.19675, -1.30040, 3.45186, 1.59816, 2.86636],
+        );
+
+
+        assert!(a.matmul(&b).equals(&c, 0.001));
     }
 
     #[test]
@@ -1028,7 +1138,7 @@ mod tests {
 
         assert_eq!(
             a.matvec(&b),
-            Tensor::from_slice([2, 2], &[5., 11., 13., 21., ])
+            Tensor::from_slice([2, 2], &[5., 11., 13., 21.,])
         );
     }
 

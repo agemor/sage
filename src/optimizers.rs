@@ -27,7 +27,6 @@ impl Optimizer for Sgd {
 
             let b = grad_tensor.deref();
 
-
             param.update_grads(b * self.lr);
         }
     }
