@@ -1,4 +1,4 @@
-use crate::tensor::{to_unsigned_index, Tensor};
+use crate::tensor::{Tensor};
 use crate::shape::{ToShape, ToIndex};
 
 impl Tensor {
@@ -7,13 +7,14 @@ impl Tensor {
     }
 
     pub fn mean(&self) -> f32 {
-        self.logical_iter().sum() / (self.size() as f32)
+        self.logical_iter().sum::<f32>() / (self.size() as f32)
     }
 
     pub fn max_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
         where I: ToIndex
     {
-        let max = self.fold_axis(&axis, f32::MIN, |&a, &b| if a > b { a } else { b });
+        let axis = axis.to_index(self.rank());
+        let max = self.fold_axis(axis, f32::MIN, |&a, &b| if a > b { a } else { b });
         if retain_axis {
             max.expand_dims(axis)
         } else {
@@ -30,6 +31,7 @@ impl Tensor {
         new_shape.remove(axis);
 
         let mut summed = Tensor::zeros(new_shape);
+
 
         for t in self.along_axis(axis) {
             summed = summed + t;
@@ -75,7 +77,7 @@ impl Tensor {
 
         y.mapv_inplace(|x| x.exp());
         let mut sum = y.sum_axis(axis, true);
-        sum.mapv_inplace(move |x| x.ln());
+        sum.mapv_inplace(|x| x.ln());
 
         sum + max
     }

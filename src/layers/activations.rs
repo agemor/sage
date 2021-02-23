@@ -1,9 +1,9 @@
 use crate::autodiff::Var;
 use crate::layers::Layer;
 
-pub struct ReLU;
+pub struct Relu;
 
-impl Layer for ReLU {
+impl Layer for Relu {
     fn init(&self) {}
 
     fn forward(&self, x: &Var) -> Var {

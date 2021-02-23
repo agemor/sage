@@ -1,9 +1,5 @@
 use crate::autodiff::{RuntimeProfile, Var};
-use crate::tensor;
-use crate::tensor::Tensor;
-use std::cell::Ref;
 use std::collections::HashSet;
-use std::ops::Deref;
 use std::time::Instant;
 
 // Variable evaluation session

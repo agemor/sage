@@ -9,17 +9,17 @@ pub trait Optimizer {
     fn update(&self, grads: HashMap<Var, Var>);
 }
 
-pub struct SGD {
+pub struct Sgd {
     lr: f32,
 }
 
-impl SGD {
-    pub fn new(lr: f32) -> SGD {
-        SGD { lr }
+impl Sgd {
+    pub fn new(lr: f32) -> Sgd {
+        Sgd { lr }
     }
 }
 
-impl Optimizer for SGD {
+impl Optimizer for Sgd {
     fn update(&self, grads: HashMap<Var, Var>) {
 
         for (param, grad) in grads {

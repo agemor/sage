@@ -1,8 +1,7 @@
-use crate::autodiff::{op, Operator, Var};
+use crate::autodiff::{Operator, Var};
 use crate::tensor::Tensor;
 use std::ops;
 use crate::shape::{Shape, ToIndex, ToShape};
-use std::net::Shutdown::Read;
 
 // basic arithmetics
 struct Add;
@@ -111,7 +110,7 @@ impl Operator<2> for Sub {
         let x1 = x[1];
 
         let gx0 = sum_to(gy, &x0.shape());
-        let gx1 = sum_to(-gy, &x1.shape());
+        let gx1 = sum_to(&-gy, &x1.shape());
 
         [gx0, gx1]
     }
@@ -123,7 +122,7 @@ impl Operator<1> for Neg {
         -x
     }
 
-    fn forward(&self, x: [&Var; 1]) -> Var {
+    fn forward(self, x: [&Var; 1]) -> Var {
         Var::from_unary_op(x[0].shape(), self, x[0])
     }
 
@@ -153,8 +152,8 @@ impl Operator<2> for Mul {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(gy * x1, x0.shape());
-        let gx1 = sum_to(gy * x0, x1.shape());
+        let gx0 = sum_to(&(gy * x1), x0.shape());
+        let gx1 = sum_to(&(gy * x0), x1.shape());
 
         [gx0, gx1]
     }
@@ -179,8 +178,8 @@ impl Operator<2> for Div {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(gy / x1, &x0.shape());
-        let gx1 = sum_to(-(gy * x0) / (x1 * x1), &x1.shape());
+        let gx0 = sum_to(&(gy / x1), &x0.shape());
+        let gx1 = sum_to(&(-(gy * x0) / (x1 * x1)), &x1.shape());
 
         [gx0, gx1]
     }
@@ -245,8 +244,8 @@ impl Operator<1> for SumTo {
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
 
-        assert!(x.rank() >= self.shape.len());
-        assert!(x.size() >= self.shape.size());
+        assert!(x.shape().len() >= self.shape.len());
+        assert!(x.shape().size() >= self.shape.size());
 
         // assert compatibility
         Shape::union(x.shape(), self.shape).unwrap();
@@ -270,8 +269,8 @@ impl Operator<1> for BroadcastTo {
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
 
-        assert!(x.rank() <= self.shape.len());
-        assert!(x.size() <= self.shape.size());
+        assert!(x.shape().len() <= self.shape.len());
+        assert!(x.shape().size() <= self.shape.size());
 
         // assert compatibility
         Shape::union(x.shape(), self.shape).unwrap();
@@ -313,7 +312,7 @@ impl Operator<2> for Matmul {
 
         // add matrix dim
         batch.insert(-1, x0.shape()[x0.rank() - 2]);
-        batch.insert(-1, x0.shape()[x1.rank() - 1]);
+        batch.insert(-1, x1.shape()[x1.rank() - 1]);
 
         Var::from_binary_op(batch, self, [x0, x1])
     }
@@ -328,10 +327,10 @@ impl Operator<2> for Matmul {
         // gy: (*, A, C)
 
         // (*, A, B) = (*, A, C) (*, C, B)
-        let gx0 = matmul(gy, &transpose(x1, -1, -2));
+        let gx0 = sum_to(&matmul(gy, &transpose(x1, -1, -2)), x0.shape());
 
         // (*, B, C) = (*, B, A) (*, A, C)
-        let gx1 = matmul(&transpose(x0, -1, -2), gy);
+        let gx1 = sum_to(&matmul(&transpose(x0, -1, -2), gy), x1.shape());
 
         [gx0, gx1]
     }
@@ -379,10 +378,10 @@ impl Operator<2> for Matvec {
         // gy: (*, A)
 
         // (*, A, B) = (*, A, 1) (*, 1, B)
-        let gx0 = matmul(&expand_dims(gy, gy.rank()), &expand_dims(x1, x1.rank() - 1));
+        let gx0 = sum_to(&matmul(&expand(gy, gy.rank()), &expand(x1, x0.rank() - 1)), x0.shape());
 
         // (*, B) = (*, B, A) (*, A)
-        let gx1 = matvec(&transpose(x0, -1, -2), gy);
+        let gx1 = sum_to(&matvec(&transpose(x0, -1, -2), gy), x1.shape());
 
         [gx0, gx1]
     }
@@ -437,7 +436,7 @@ impl Operator<1> for Expand {
 
 
 impl Operator<1> for Squeeze {
-    fn compute(&self, x: &[&Tensor]) -> Tensor {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.squeeze(self.axis)
     }
@@ -451,7 +450,7 @@ impl Operator<1> for Squeeze {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = expand_dims(gy, self.axis);
+        let gx = expand(gy, self.axis);
         [gx]
     }
 }
@@ -524,7 +523,7 @@ impl Operator<2> for SoftmaxCrossEntropy {
         let log_z = x0.log_sum_exp(1);
 
         let log_p = log_z * t;
-        -log_p.sum_axis(-1, false)
+        -log_p.sum_axis(1, false)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -547,7 +546,7 @@ impl Operator<2> for SoftmaxCrossEntropy {
 
         let sm = softmax(x0, -1);
 
-        let gx0 = gy * (sm - t);
+        let gx0 = (sm - t) * expand(gy, 1);
         // does not calculate adjoint for t. btw, who need them?
         [gx0, t.clone()]
     }
@@ -626,10 +625,10 @@ pub fn transpose<I, J>(x: &Var, axis_a: I, axis_b: J) -> Var
     }.forward([x])
 }
 
-pub fn expand_dims<I>(x: &Var, axis: I) -> Var
+pub fn expand<I>(x: &Var, axis: I) -> Var
     where I: ToIndex
 {
-    Expand { axis: axis.to_index(x.rank()) }.forward([x])
+    Expand { axis: axis.to_index(x.rank() + 1) }.forward([x])
 }
 
 pub fn squeeze<I>(x: &Var, axis: I) -> Var
@@ -678,3 +677,9 @@ impl_op!(/ |a: &Var, b: &Var| -> Var { div(a, b) });
 
 impl_op!(-|a: Var| -> Var { neg(&a) });
 impl_op!(-|a: &Var| -> Var { neg(a) });
+
+
+////////////// unit tests //////////////
+
+
+

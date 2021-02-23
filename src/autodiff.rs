@@ -9,22 +9,21 @@ use std::time::Duration;
 
 use crate::ops;
 use crate::session::Session;
-use crate::tensor::shape::{Dim, IntoDimension, ShapeError};
 use crate::tensor::Tensor;
 use std::ops::Deref;
 use itertools::Itertools;
 use crate::shape::{ToShape, Shape};
 
-pub trait Operator<const Arity: usize> {
-    fn compute(&self, x: [&Tensor; Arity]) -> Tensor;
+pub trait Operator<const N: usize> {
+    fn compute(&self, x: [&Tensor; N]) -> Tensor;
 
-    fn forward(self, x: [&Var; Arity]) -> Var;
+    fn forward(self, x: [&Var; N]) -> Var;
 
 
     // f(x) = u
     // f'(x) -> ∂u/∂x
     // f'(x) * gy = ∂u/∂x * ∂y/∂u = ∂y/∂x
-    fn backward(&self, x: [&Var; Arity], gy: &Var) -> [Var; Arity];
+    fn backward(&self, x: [&Var; N], gy: &Var) -> [Var; N];
 
 
     fn mem_req(&self) -> usize {
@@ -32,18 +31,18 @@ pub trait Operator<const Arity: usize> {
     }
 }
 
-pub struct Operation<const Arity: usize> {
-    operator: Box<dyn Operator<{ Arity }>>,
+pub struct Operation<const N: usize> {
+    operator: Box<dyn Operator<{ N }>>,
     order: usize,
 
-    input: [Var; Arity],
+    input: [Var; N],
     output: WeakVar, // to prevent cyclic references
 }
 
 
-impl<const Arity: usize> Operation<{ Arity }> {
-    pub fn new<O>(operator: O, input: [Var; Arity], output: Var) -> Self
-        where O: Operator<{ Arity }>
+impl<const N: usize> Operation<{ N }> {
+    pub fn new<O>(operator: O, input: [Var; N], output: Var) -> Self
+        where O: Operator<{ N }> + 'static
     {
         let order = input
             .iter()
@@ -70,7 +69,7 @@ impl<const Arity: usize> Operation<{ Arity }> {
         self.operator.mem_req()
     }
 
-    pub fn input(&self) -> [Var; Arity] {
+    pub fn input(&self) -> [Var; N] {
         self.input.clone()
     }
 
@@ -78,7 +77,7 @@ impl<const Arity: usize> Operation<{ Arity }> {
         self.output.to_var().unwrap()
     }
 
-    pub fn input_adjoint(&self, output_adjoint: &Var) -> [Var; Arity] {
+    pub fn input_adjoint(&self, output_adjoint: &Var) -> [Var; N] {
         let input = self.input.each_ref();
         self.operator.backward(input, output_adjoint)
     }
@@ -154,22 +153,21 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
 
     while !queue.is_empty() {
         // must unwrap
-        let var = queue.pop().unwrap().into_inner();
-        let var_node = var.node();
-
-        let y = var;
+        let y = queue.pop().unwrap().into_inner();
         let gy = grads.get(&y).unwrap();
 
-        if let Some(ref operation) = var_node.origin {
+        let y_node = y.node();
+
+        if let Some(ref operation) = y_node.origin {
             let x = operation.input();
             let gx = operation.input_adjoint(gy);
 
             // insert (x, gx) pairs into grads hashmap
-            for (x, gx) in x.iter().zip(gx.iter()) {
+            for (x, gx) in x.into_iter().zip(gx.iter()) {
                 grads
                     .entry(x.clone())
                     .and_modify(|v| *v = ops::add(v, gx))
-                    .or_insert(gx.clone());
+                    .or_insert_with(|| gx.clone());
 
                 queue.push(x.into_ranked())
             }
@@ -307,7 +305,7 @@ impl Var {
 
     pub fn from_unary_op<S, O>(shape: S, operator: O, arg: &Var) -> Self
         where S: ToShape,
-              O: Operator<1>
+              O: Operator<1> + 'static
     {
         let var = Var::with_shape(shape);
 
@@ -321,7 +319,7 @@ impl Var {
 
     pub fn from_binary_op<S, O>(shape: S, operator: O, args: [&Var; 2]) -> Self
         where S: ToShape,
-              O: Operator<2>
+              O: Operator<2> + 'static
     {
         let var = Var::with_shape(shape);
 
@@ -343,7 +341,7 @@ impl Var {
         Ranked { inner: self, rank }
     }
 
-    pub fn to_weak(&self) -> WeakVar {
+     fn to_weak(&self) -> WeakVar {
         WeakVar::from(self)
     }
 
@@ -391,10 +389,11 @@ impl Var {
     }
 
     pub fn update_grads(&self, grad: Tensor) {
+
         let mut node = self.node_mut();
         let param = node.data.as_ref().unwrap();
 
-        let new_param = (param - grad);
+        let new_param = param - grad;
 
         node.data = Some(new_param);
     }

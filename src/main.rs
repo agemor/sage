@@ -14,7 +14,7 @@ extern crate impl_ops;
 
 use crate::autodiff::{diff, Var};
 use crate::data::Dataset;
-use crate::layers::activations::ReLU;
+use crate::layers::activations::Relu;
 use crate::layers::{Affine, Layer, Sequential};
 use crate::mnist::Mnist;
 use crate::optimizers::Optimizer;
@@ -40,13 +40,13 @@ fn main() {
     // Model
     let model = Sequential::from(vec![
         box Affine::new(784, 128),
-        box ReLU,
+        box Relu,
         box Affine::new(128, 10),
-        box ReLU,
+        box Relu,
     ]);
 
     // Optimizer
-    let optimizer = optimizers::SGD::new(0.0001);
+    let optimizer = optimizers::Sgd::new(0.0001);
 
     // Initialize model weights and optimizer params
     model.init();
@@ -64,7 +64,7 @@ fn main() {
         let params = model.params().unwrap();
         let grads = diff(&loss, &params);
 
-        println!("loss: {}", loss.data().sum() / 32.0);
+        println!("loss: {}", loss.data().mean());
 
         optimizer.update(grads);
     }
@@ -85,7 +85,6 @@ fn main() {
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-    use crate::ops::{matvec, sum_to};
 
 
     #[test]

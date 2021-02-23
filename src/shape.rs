@@ -1,7 +1,6 @@
-use std;
 use std::{slice, fmt};
 use std::ops::{Index, IndexMut};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Formatter};
 
 const MAX_SHAPE_LEN: usize = 9;
 
@@ -107,7 +106,7 @@ impl Shape {
     }
 
     pub fn size(&self) -> usize {
-        self.sizes.iter().product()
+        self.sizes().iter().product()
     }
 
     pub fn sizes(&self) -> &[usize] {
@@ -129,7 +128,7 @@ impl Shape {
     pub fn insert<I>(&mut self, axis: I, size: usize) -> &mut Self
         where I: ToIndex
     {
-        let axis = axis.to_index(self.len);
+        let axis = axis.to_index(self.len + 1);
         if size == 0 {
             panic!("shape size cannot be zero");
         }
@@ -175,7 +174,9 @@ impl Shape {
         self
     }
 
-    pub fn replace<I>(&mut self, axis: I, size: usize) -> &mut Self {
+    pub fn replace<I>(&mut self, axis: I, size: usize) -> &mut Self
+        where I: ToIndex
+    {
         let axis = axis.to_index(self.len);
         if size == 0 {
             panic!("shape size cannot be zero");
@@ -187,7 +188,7 @@ impl Shape {
     pub fn split<I>(&self, axis: I) -> (Shape, Shape)
         where I: ToIndex
     {
-        let axis = axis.to_index(self.len);
+        let axis = axis.to_index(self.len + 1);
 
         let (sizes_a, sizes_b) = self.sizes().split_at(axis);
         (Shape::new(sizes_a), Shape::new(sizes_b))
@@ -248,13 +249,13 @@ pub trait ToShape {
 
 impl ToShape for Shape {
     fn to_shape(&self) -> Shape {
-        self.clone()
+        *self
     }
 }
 
 impl ToShape for &Shape {
     fn to_shape(&self) -> Shape {
-        (*self).clone()
+        **self
     }
 }
 
@@ -360,11 +361,6 @@ fn assert_index_bounds(index: isize, bound: usize) {
     if index > upper || index < lower {
         panic!(format!("index out of range: expected index in range of {}..{}, but {} is given.", lower, upper, index));
     }
-}
-
-
-fn main() {
-    println!("Hello, world!");
 }
 
 

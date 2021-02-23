@@ -64,7 +64,7 @@ impl Tensor {
     }
 
     pub fn mem_size(&self) -> usize {
-        unsafe { self.arr().len() }
+        self.arr().len()
     }
 
     // returns that the inner content of the tensor is contiguous.
@@ -101,7 +101,7 @@ impl Tensor {
         self.strides
             .iter()
             .filter(|&a| *a > 0)
-            .is_sorted_by(|&a, &b| Some({ b.cmp(a) }))
+            .is_sorted_by(|&a, &b| Some(b.cmp(a)))
     }
 
     // constructors
@@ -149,7 +149,7 @@ impl Tensor {
         let shape = shape.to_shape();
 
         let mut v = Vec::<f32>::with_capacity(shape.size());
-        let mut rng = &mut SmallRng::from_rng(thread_rng()).unwrap();
+        let rng = &mut SmallRng::from_rng(thread_rng()).unwrap();
 
         for _ in 0..shape.size() {
             v.push(dist.sample(rng));
@@ -160,8 +160,9 @@ impl Tensor {
 
     // private
     fn from_ndarray(ndarray: ndarray::ArrayD<f32>) -> Self {
+        let shape = ndarray.shape().to_shape();
         let vec = ndarray.into_raw_vec();
-        Tensor::from_vec(ndarray.shape(), vec) // must unwrap
+        Tensor::from_vec(shape, vec) // must unwrap
     }
 
     pub fn scalar(v: f32) -> Self {
@@ -188,7 +189,7 @@ impl Tensor {
 
             let mut raw_ptr = self.arr().as_ptr();
             // calculate offset
-            raw_ptr = raw_ptr.offset(self.offset as isize);
+            raw_ptr = raw_ptr.add(self.offset);
 
             let shape = ndarray::IxDyn(self.shape.sizes()).strides(ndarray::IxDyn(self.strides()));
 
@@ -525,13 +526,13 @@ impl Tensor {
         let stride = self.strides[axis];
         let offset = stride * start_index;
 
-        let mut new_dim = self.shape.clone();
+        let mut new_shape = self.shape;
         let mut new_stride = self.strides.clone();
 
-        new_dim[axis] = end_index - start_index + 1;
+        new_shape[axis] = end_index - start_index + 1;
         new_stride.remove(axis);
 
-        Tensor::view(self, new_dim, &new_stride, self.offset + offset)
+        Tensor::view(self, new_shape, &new_stride, self.offset + offset)
     }
 
     pub fn slice<I, J>(&self, start_index: I, end_index: J) -> Tensor
@@ -563,8 +564,8 @@ impl Tensor {
             let a = self.to_ndarray();
             let b = other.to_ndarray();
 
-            let a2d = a.into_shapeality::<ndarray::Ix2>().unwrap();
-            let b2d = b.into_shapeality::<ndarray::Ix2>().unwrap();
+            let a2d = a.into_dimensionality::<ndarray::Ix2>().unwrap();
+            let b2d = b.into_dimensionality::<ndarray::Ix2>().unwrap();
             let c2d = a2d.dot(&b2d);
             Tensor::from_ndarray(c2d.into_dyn())
         } else {
@@ -621,7 +622,7 @@ impl Tensor {
 
         let mut folded_shape = self.shape;
         folded_shape.remove(axis_u);
-        let mut folded = Tensor::from_elem(folded_shape, init);
+        let folded = Tensor::from_elem(folded_shape, init);
 
         for t in self.along_axis(axis) {
             // wow!
@@ -645,9 +646,7 @@ impl Tensor {
             // fast, contiguous iter
             if self.is_bijective() && self.is_contiguous() {
                 unsafe {
-                    let offset_ptr = self.arr().as_ptr().offset(
-                        self.offset as isize
-                    );
+                    let offset_ptr = self.arr().as_ptr().add(self.offset);
                     let s = slice::from_raw_parts(offset_ptr, self.size());
                     s.iter().map(f).collect::<Vec<f32>>()
                 }
@@ -668,7 +667,7 @@ impl Tensor {
     {
         if self.is_contiguous() {
             unsafe {
-                let offset_ptr = self.arr_mut().as_mut_ptr().offset(self.offset as isize);
+                let offset_ptr = self.arr_mut().as_mut_ptr().add(self.offset);
                 let s = slice::from_raw_parts_mut(offset_ptr, self.size());
                 s.iter_mut().for_each(|x| *x = f(x));
             }
@@ -708,7 +707,7 @@ impl Tensor {
         where
             F: Fn(&f32, &f32) -> f32,
     {
-        if let Ok(u) = self.shape.union(&other.shape) {
+        if let Ok(u) = Shape::union(self.shape, other.shape) {
             let a = self.upcast(&u).unwrap();
             let b = other.upcast(&u).unwrap();
 
@@ -724,18 +723,6 @@ impl Tensor {
         }
     }
 
-    // element iteration
-    fn unordered_foreach(&self) {
-        // only offset changes are exist
-        if self.is_contiguous() {
-
-            // transpose, reshape .... ,
-        }
-
-        // shape -> make it ordered.... and
-
-        // if there is
-    }
 }
 
 
@@ -1049,15 +1036,19 @@ mod tests {
     fn test_mapv() {}
 
     #[test]
-    fn test_to_unsigned_index() {
-        assert_eq!(to_unsigned_index(-3, 3), 0);
-        assert_eq!(to_unsigned_index(-2, 3), 1);
-        assert_eq!(to_unsigned_index(-1, 3), 2);
-        assert_eq!(to_unsigned_index(0, 3), 0);
-        assert_eq!(to_unsigned_index(1, 3), 1);
-        assert_eq!(to_unsigned_index(2, 3), 2);
-        assert_eq!(to_unsigned_index(3, 3), 3);
-        assert_eq!(to_unsigned_index(4, 3), 4);
-        assert_eq!(to_unsigned_index(5, 3), 5);
+    fn test_to_index() {
+        assert_eq!((-3).to_index(3), 0);
+        assert_eq!((-2).to_index(3), 1);
+        assert_eq!((-1).to_index(3), 2);
+        assert_eq!((0).to_index(3), 0);
+        assert_eq!((1).to_index(3), 1);
+        assert_eq!((2).to_index(3), 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_to_index_panic() {
+        assert_eq!((-4).to_index(3), 0);
+        assert_eq!((3).to_index(3), 2);
     }
 }
