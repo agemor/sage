@@ -74,6 +74,14 @@ struct Softmax {
 // loss functions
 struct SoftmaxCrossEntropy;
 
+// math operations
+
+struct Reciprocal;
+
+struct Sqrt;
+
+struct Pow;
+
 impl Operator<2> for Add {
     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
         let x0 = x[0];
@@ -602,6 +610,53 @@ impl Operator<2> for SoftmaxCrossEntropy {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+impl Operator<1> for Reciprocal {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        unimplemented!()
+    }
+}
+
+impl Operator<1> for Sqrt {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let x = x[0];
+        let gx = div(gy, &scalar_mul(&sqrt(x), 2.0));
+        [gx]
+    }
+}
+
+impl Operator<1> for Pow {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        unimplemented!()
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 pub fn identity(x: &Var) -> Var {
@@ -735,6 +790,18 @@ where
 
 pub fn softmax_cross_entropy(x: &Var, t: &Var) -> Var {
     SoftmaxCrossEntropy.forward([x, t])
+}
+
+pub fn reciprocal(x: &Var) -> Var {
+    Reciprocal.forward([x])
+}
+
+pub fn sqrt(x: &Var) -> Var {
+    Sqrt.forward([x])
+}
+
+pub fn pow(x: &Var) -> Var {
+    Pow.forward([x])
 }
 
 impl_op!(+ |a: Var, b: Var| -> Var { add(&a, &b) });

@@ -28,6 +28,7 @@ mod optimizers;
 mod session;
 mod shape;
 mod tensor;
+mod models;
 
 fn main() {
     // Load dataset

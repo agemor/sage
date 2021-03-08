@@ -2,13 +2,27 @@ pub mod activations;
 pub mod loss;
 
 use crate::autodiff::Var;
-use crate::{ops, tensor};
 use crate::tensor::Tensor;
+use crate::{ops, tensor};
 
 pub trait Layer {
     fn init(&self);
     fn forward(&self, x: &Var) -> Var;
     fn params(&self) -> Option<Vec<&Var>>;
+}
+
+pub fn gather_params(params: Vec<Option<Vec<&Var>>>) -> Option<Vec<&Var>> {
+    let mut res = Vec::<&Var>::new();
+    for p in params {
+        if let Some(param) = p {
+            res.extend(param);
+        }
+    }
+    if res.is_empty() {
+        None
+    } else {
+        Some(res)
+    }
 }
 
 pub struct Sequential {
@@ -74,8 +88,7 @@ impl Layer for Affine {
         self.kernel
             .set_data(tensor::init::kaiming_uniform(self.kernel.shape(), 1.0));
 
-        self.bias
-            .set_data(Tensor::zeros(self.bias.shape()));
+        self.bias.set_data(Tensor::zeros(self.bias.shape()));
     }
 
     fn forward(&self, x: &Var) -> Var {
