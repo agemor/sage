@@ -7,7 +7,7 @@ pub trait Dataset {
 }
 
 pub struct Iter<'a, T> {
-    dataset: &'a dyn Dataset<Item=T>,
+    dataset: &'a dyn Dataset<Item = T>,
     index: usize,
 }
 
@@ -34,10 +34,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
 impl<T> Iter<'_, T> {
     pub fn batch<F>(self, size: usize, f: F) -> Batch<Self, F> {
-        Batch { iter: self, size, f }
+        Batch {
+            iter: self,
+            size,
+            f,
+        }
     }
 }
-
 
 pub struct Batch<I, F> {
     iter: I,
@@ -45,8 +48,8 @@ pub struct Batch<I, F> {
     f: F,
 }
 
-
-impl<I, F, B> Iterator for Batch<I, F> where
+impl<I, F, B> Iterator for Batch<I, F>
+where
     I: Iterator,
     F: Fn(&[I::Item]) -> Option<B>,
 {
@@ -68,4 +71,3 @@ impl<I, F, B> Iterator for Batch<I, F> where
         }
     }
 }
-
