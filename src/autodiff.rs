@@ -8,23 +8,22 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use crate::ops;
+use crate::ops::{matmul, reshape, transpose};
 use crate::session::Session;
+use crate::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
-use std::ops::Deref;
 use itertools::Itertools;
-use crate::shape::{ToShape, Shape};
+use std::ops::Deref;
 
 pub trait Operator<const N: usize> {
     fn compute(&self, x: [&Tensor; N]) -> Tensor;
 
     fn forward(self, x: [&Var; N]) -> Var;
 
-
     // f(x) = u
     // f'(x) -> ∂u/∂x
     // f'(x) * gy = ∂u/∂x * ∂y/∂u = ∂y/∂x
     fn backward(&self, x: [&Var; N], gy: &Var) -> [Var; N];
-
 
     fn mem_req(&self) -> usize {
         mem::size_of::<f32>()
@@ -39,10 +38,10 @@ pub struct Operation<const N: usize> {
     output: WeakVar, // to prevent cyclic references
 }
 
-
 impl<const N: usize> Operation<{ N }> {
     pub fn new<O>(operator: O, input: [Var; N], output: Var) -> Self
-        where O: Operator<{ N }> + 'static
+    where
+        O: Operator<{ N }> + 'static,
     {
         let order = input
             .iter()
@@ -83,7 +82,6 @@ impl<const N: usize> Operation<{ N }> {
     }
 }
 
-
 pub enum OperationEnum {
     Unary(Operation<1>),
     Binary(Operation<2>),
@@ -93,54 +91,54 @@ pub enum OperationEnum {
 impl OperationEnum {
     pub fn arity(&self) -> usize {
         match self {
-            Self::Unary(_) => { 1 }
-            Self::Binary(_) => { 2 }
+            Self::Unary(_) => 1,
+            Self::Binary(_) => 2,
         }
     }
 
     pub fn order(&self) -> usize {
         match self {
-            Self::Unary(o) => { o.order }
-            Self::Binary(o) => { o.order }
+            Self::Unary(o) => o.order,
+            Self::Binary(o) => o.order,
         }
     }
 
     pub fn compute(&self) -> Tensor {
         match self {
-            Self::Unary(o) => { o.compute() }
-            Self::Binary(o) => { o.compute() }
+            Self::Unary(o) => o.compute(),
+            Self::Binary(o) => o.compute(),
         }
     }
 
     pub fn mem_req(&self) -> usize {
         match self {
-            Self::Unary(o) => { o.mem_req() }
-            Self::Binary(o) => { o.mem_req() }
+            Self::Unary(o) => o.mem_req(),
+            Self::Binary(o) => o.mem_req(),
         }
     }
 
-    pub fn input(&self) -> Vec<Var> { // TODO: change it to smallvec for better performance
+    pub fn input(&self) -> Vec<Var> {
+        // TODO: change it to smallvec for better performance
         match self {
-            Self::Unary(o) => { o.input.to_vec() }
-            Self::Binary(o) => { o.input.to_vec() }
+            Self::Unary(o) => o.input.to_vec(),
+            Self::Binary(o) => o.input.to_vec(),
         }
     }
 
     pub fn output(&self) -> Option<Var> {
         match self {
-            Self::Unary(o) => { o.output.to_var() }
-            Self::Binary(o) => { o.output.to_var() }
+            Self::Unary(o) => o.output.to_var(),
+            Self::Binary(o) => o.output.to_var(),
         }
     }
 
     pub fn input_adjoint(&self, output_adjoint: &Var) -> Vec<Var> {
         match self {
-            Self::Unary(o) => { o.input_adjoint(output_adjoint).to_vec() }
-            Self::Binary(o) => { o.input_adjoint(output_adjoint).to_vec() }
+            Self::Unary(o) => o.input_adjoint(output_adjoint).to_vec(),
+            Self::Binary(o) => o.input_adjoint(output_adjoint).to_vec(),
         }
     }
 }
-
 
 // Differentiate variables, a.k.a. backpropagation
 pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
@@ -184,7 +182,6 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
 
     grads
 }
-
 
 pub struct RuntimeProfile {
     pub mem_store: usize,
@@ -267,7 +264,8 @@ impl Var {
     /////// Var constructors ///////
 
     pub fn with_shape<S>(s: S) -> Var
-        where S: ToShape,
+    where
+        S: ToShape,
     {
         Var {
             node: Rc::new(RefCell::new(VarNode {
@@ -302,10 +300,10 @@ impl Var {
 
     /////// Var constructors (from operation) ///////
 
-
     pub fn from_unary_op<S, O>(shape: S, operator: O, arg: &Var) -> Self
-        where S: ToShape,
-              O: Operator<1> + 'static
+    where
+        S: ToShape,
+        O: Operator<1> + 'static,
     {
         let var = Var::with_shape(shape);
 
@@ -318,8 +316,9 @@ impl Var {
     }
 
     pub fn from_binary_op<S, O>(shape: S, operator: O, args: [&Var; 2]) -> Self
-        where S: ToShape,
-              O: Operator<2> + 'static
+    where
+        S: ToShape,
+        O: Operator<2> + 'static,
     {
         let var = Var::with_shape(shape);
 
@@ -334,17 +333,15 @@ impl Var {
 
     /////// Var converters ///////
 
-
     pub fn into_ranked(self) -> Ranked<Self> {
         let rank = self.node().order();
 
         Ranked { inner: self, rank }
     }
 
-     fn to_weak(&self) -> WeakVar {
+    fn to_weak(&self) -> WeakVar {
         WeakVar::from(self)
     }
-
 
     /////// Node accesses ///////
 
@@ -355,7 +352,6 @@ impl Var {
     pub fn node_mut(&self) -> RefMut<VarNode> {
         RefCell::borrow_mut(&self.node)
     }
-
 
     pub fn is_evaluated(&self) -> bool {
         let node = self.node();
@@ -389,7 +385,6 @@ impl Var {
     }
 
     pub fn update_grads(&self, grad: Tensor) {
-
         let mut node = self.node_mut();
         let param = node.data.as_ref().unwrap();
 
@@ -398,9 +393,29 @@ impl Var {
         node.data = Some(new_param);
     }
 
-
     pub fn set_data(&self, data: Tensor) {
         self.node_mut().data = Some(data);
+    }
+
+    /////////// math functions+
+
+    pub fn matmul(&self, other: &Var) -> Var {
+        matmul(self, other)
+    }
+
+    pub fn transpose<I, J>(&self, axis_a: I, axis_b: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        transpose(self, axis_a, axis_b)
+    }
+
+    pub fn reshape<S>(&self, shape: S) -> Var
+    where
+        S: ToShape,
+    {
+        reshape(self, shape)
     }
 }
 
@@ -433,21 +448,20 @@ impl AsRef<Var> for Var {
 }
 
 struct WeakVar {
-    node: Weak<RefCell<VarNode>>
+    node: Weak<RefCell<VarNode>>,
 }
 
 impl WeakVar {
     fn from(var: &Var) -> Self {
-        WeakVar { node: Rc::downgrade(&var.node) }
+        WeakVar {
+            node: Rc::downgrade(&var.node),
+        }
     }
 
     fn to_var(&self) -> Option<Var> {
-        self.node.upgrade().map(|x| {
-            Var::from_node(x)
-        })
+        self.node.upgrade().map(|x| Var::from_node(x))
     }
 }
-
 
 pub struct Ranked<T> {
     inner: T,

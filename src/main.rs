@@ -23,12 +23,14 @@ mod autodiff;
 mod data;
 mod layers;
 mod mnist;
+mod models;
 mod ops;
 mod optimizers;
 mod session;
 mod shape;
+mod sim;
 mod tensor;
-mod models;
+mod var;
 
 fn main() {
     // Load dataset

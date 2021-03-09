@@ -274,7 +274,7 @@ impl Tensor {
     ///////////////// index, slice, join /////////////////
 
     // * Creates new tensor
-    pub fn cat<I>(tensors: &[Tensor], axis: I) -> Result<Tensor, ShapeError>
+    pub fn cat<I>(tensors: &[&Tensor], axis: I) -> Result<Tensor, ShapeError>
     where
         I: ToIndex,
     {
@@ -1007,7 +1007,7 @@ mod tests {
         let a = Tensor::ones([3, 2, 5]);
         let b = Tensor::ones([3, 2, 5]);
         assert_eq!(
-            Tensor::cat(&[a, b], 2).unwrap().shape(),
+            Tensor::cat(&[&a, &b], 2).unwrap().shape(),
             [3, 2, 10].to_shape()
         );
     }
