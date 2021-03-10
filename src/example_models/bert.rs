@@ -1,11 +1,13 @@
-use crate::autodiff::Var;
+use crate::autodiff::var::Var;
 use crate::layers::activations::Relu;
-use crate::layers::{gather_params, Affine, Layer, Sequential};
-use crate::models::attention::MultiHeadAttention;
-use crate::models::common::{Dropout, Embedding, LayerNorm};
+use crate::layers::attention::MultiHeadAttention;
+use crate::layers::base::{Dense, Dropout, Sequential};
+use crate::layers::embedding::Embedding;
+use crate::layers::normalization::LayerNorm;
+use crate::layers::{gather_params, Parameter, Stackable};
 
 #[derive(Copy, Clone)]
-struct BertConfig {
+pub struct BertConfig {
     embed_dim: usize,
 
     // Embedding
@@ -14,11 +16,13 @@ struct BertConfig {
 
     // Encoding
     hidden_dim: usize,
-    num_encoding_layers: usize,
+    num_layers: usize,
     num_attention_heads: usize,
     layer_norm_eps: f32,
-
     dropout_prob: f32,
+
+    // classifier
+    num_classes: usize,
 }
 
 impl BertConfig {
@@ -28,18 +32,19 @@ impl BertConfig {
             num_vocabs: 30522,
             max_num_tokens: 512,
             hidden_dim: 3072,
-            num_encoding_layers: 12,
+            num_layers: 12,
             num_attention_heads: 12,
             layer_norm_eps: 1e-12,
             dropout_prob: 0.3,
+            num_classes: 2,
         }
     }
 }
 
-struct Bert {
+pub struct Bert {
     embedding: BertEmbedding,
     encoder: BertEncoder,
-    classifier: Affine,
+    classifier: Dense,
 }
 
 impl Bert {
@@ -47,18 +52,34 @@ impl Bert {
         Bert {
             embedding: BertEmbedding::new(config),
             encoder: BertEncoder::new(config),
-            classifier: Affine::new(config.embed_dim, 2),
+            classifier: Dense::new(config.embed_dim, config.num_classes),
         }
     }
 
-    pub fn forward_with(&self, token_ids: &[usize], attn_mask: &Var) -> Var {
-        let embeddings = self.embedding.forward_with(token_ids);
-        let features = self.encoder.forward_with(embeddings, attn_mask);
+    pub fn forward(&self, token_ids: &[usize], attn_mask: &Var) -> Var {
+        let embeddings = self.embedding.forward(token_ids);
+        let features = self.encoder.forward(embeddings, attn_mask);
 
-        let cls_tokens = features.select(1, 1);
+        let cls_tokens = features.index(1, 1);
         let logits = self.classifier.forward(&cls_tokens);
 
         logits
+    }
+}
+
+impl Parameter for Bert {
+    fn init(&self) {
+        self.embedding.init();
+        self.encoder.init();
+        self.classifier.init();
+    }
+
+    fn params(&self) -> Option<Vec<&Var>> {
+        gather_params(vec![
+            self.embedding.params(),
+            self.encoder.params(),
+            self.classifier.params(),
+        ])
     }
 }
 
@@ -81,31 +102,27 @@ impl BertEmbedding {
         }
     }
 
-    pub fn forward_with(&self, token_ids: &[usize]) -> Var {
+    pub fn forward(&self, token_ids: &[usize]) -> Var {
         // support 2d token ids
         unimplemented!();
 
         let pos_ids = (0..token_ids.len()).collect::<Vec<usize>>();
         let type_ids = vec![0; token_ids.len()];
-        let word_embeddings = self.word_emb.forward_with(token_ids);
-        let pos_embeddings = self.pos_emb.forward_with(&pos_ids);
-        let type_embeddings = self.word_emb.forward_with(&type_ids);
+        let word_embeddings = self.word_emb.forward(token_ids);
+        let pos_embeddings = self.pos_emb.forward(&pos_ids);
+        let type_embeddings = self.word_emb.forward(&type_ids);
 
         self.norm
             .forward(&(word_embeddings + pos_embeddings + type_embeddings))
     }
 }
 
-impl Layer for BertEmbedding {
+impl Parameter for BertEmbedding {
     fn init(&self) {
         self.word_emb.init();
         self.pos_emb.init();
         self.type_emb.init();
         self.norm.init();
-    }
-
-    fn forward(&self, x: &Var) -> Var {
-        unimplemented!()
     }
 
     fn params(&self) -> Option<Vec<&Var>> {
@@ -125,27 +142,23 @@ struct BertEncoder {
 impl BertEncoder {
     pub fn new(config: BertConfig) -> Self {
         BertEncoder {
-            layers: (0..config.num_encoding_layers)
+            layers: (0..config.num_layers)
                 .into_iter()
                 .map(|_| BertLayer::new(config))
                 .collect(),
         }
     }
 
-    pub fn forward_with(&self, x: Var, attn_mask: &Var) -> Var {
+    pub fn forward(&self, x: Var, attn_mask: &Var) -> Var {
         self.layers
             .iter()
-            .fold(x, |x, layer| layer.forward_with(&x, attn_mask))
+            .fold(x, |x, layer| layer.forward(&x, attn_mask))
     }
 }
 
-impl Layer for BertEncoder {
+impl Parameter for BertEncoder {
     fn init(&self) {
         self.layers.iter().for_each(|x| x.init());
-    }
-
-    fn forward(&self, x: &Var) -> Var {
-        panic!("use forward_with");
     }
 
     fn params(&self) -> Option<Vec<&Var>> {
@@ -169,31 +182,27 @@ impl BertLayer {
                 config.layer_norm_eps,
             ),
             ffn: Sequential::from(vec![
-                box Affine::new(config.embed_dim, config.hidden_dim),
+                box Dense::new(config.embed_dim, config.hidden_dim),
                 box Relu,
-                box Affine::new(config.hidden_dim, config.embed_dim),
+                box Dense::new(config.hidden_dim, config.embed_dim),
                 box Dropout::new(config.dropout_prob),
             ]),
             norm: LayerNorm::new([config.embed_dim], config.layer_norm_eps),
         }
     }
 
-    pub fn forward_with(&self, x: &Var, attn_mask: &Var) -> Var {
-        let interim_features = self.attention.forward_with(x, attn_mask);
+    pub fn forward(&self, x: &Var, attn_mask: &Var) -> Var {
+        let interim_features = self.attention.forward(x, attn_mask);
         let out_features = self.ffn.forward(&interim_features);
         self.norm.forward(&(out_features + interim_features))
     }
 }
 
-impl Layer for BertLayer {
+impl Parameter for BertLayer {
     fn init(&self) {
         self.attention.init();
         self.ffn.init();
         self.norm.init();
-    }
-
-    fn forward(&self, x: &Var) -> Var {
-        panic!("use forward_with");
     }
 
     fn params(&self) -> Option<Vec<&Var>> {

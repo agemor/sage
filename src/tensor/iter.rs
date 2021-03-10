@@ -2,7 +2,6 @@ use crate::tensor::Tensor;
 
 use std::marker::PhantomData;
 
-
 pub struct CoordIter {
     dim: Vec<usize>,
     // all inline vec
@@ -26,9 +25,7 @@ impl CoordIter {
         self.coord
             .iter()
             .zip(self.strides.iter())
-            .fold(0, |a, (c, s)| {
-                a + c * s
-            })
+            .fold(0, |a, (c, s)| a + c * s)
     }
 
     fn next_coord(&mut self) {
@@ -40,10 +37,7 @@ impl CoordIter {
                 self.coord[axis] += 1;
                 break;
             } else if axis > 0 {
-                self.coord
-                    .iter_mut()
-                    .skip(axis)
-                    .for_each(|e| *e = 0);
+                self.coord.iter_mut().skip(axis).for_each(|e| *e = 0);
                 axis -= 1;
             } else {
                 self.done = true;
@@ -66,7 +60,6 @@ impl Iterator for CoordIter {
     }
 }
 
-
 pub struct AlongAxisIter<'a> {
     t: &'a Tensor,
     axis: usize,
@@ -75,11 +68,7 @@ pub struct AlongAxisIter<'a> {
 
 impl<'a> AlongAxisIter<'a> {
     pub fn new(t: &'a Tensor, axis: usize) -> Self {
-        AlongAxisIter {
-            t,
-            axis,
-            index: 0,
-        }
+        AlongAxisIter { t, axis, index: 0 }
     }
 }
 
@@ -89,13 +78,15 @@ impl<'a> Iterator for AlongAxisIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.t.shape[self.axis] {
             self.index += 1;
-            Some(self.t.index_axis((self.index - 1) as isize, self.axis as isize))
+            Some(
+                self.t
+                    .index_axis((self.index - 1) as isize, self.axis as isize),
+            )
         } else {
             None
         }
     }
 }
-
 
 pub struct Iter<'a> {
     ptr: *const f32,
@@ -110,7 +101,7 @@ impl<'a> Iter<'a> {
             ptr,
             offset,
             coord_iter: CoordIter::new(dim, strides),
-            phantom: PhantomData
+            phantom: PhantomData,
         }
     }
 }
@@ -119,11 +110,9 @@ impl<'a> Iterator for Iter<'a> {
     type Item = &'a f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.coord_iter.next().map(|index| {
-            unsafe {
-                let elem = self.ptr.add(index + self.offset);
-                elem.as_ref().unwrap()
-            }
+        self.coord_iter.next().map(|index| unsafe {
+            let elem = self.ptr.add(index + self.offset);
+            elem.as_ref().unwrap()
         })
     }
 }
@@ -141,7 +130,7 @@ impl<'a> IterMut<'a> {
             ptr,
             offset,
             coord_iter: CoordIter::new(dim, strides),
-            phantom: PhantomData
+            phantom: PhantomData,
         }
     }
 }
@@ -150,15 +139,12 @@ impl<'a> Iterator for IterMut<'a> {
     type Item = &'a mut f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.coord_iter.next().map(|index| {
-            unsafe {
-                let elem = self.ptr.add(index + self.offset);
-                elem.as_mut().unwrap()
-            }
+        self.coord_iter.next().map(|index| unsafe {
+            let elem = self.ptr.add(index + self.offset);
+            elem.as_mut().unwrap()
         })
     }
 }
-
 
 // shape (un-broadcasted, ordered)
 // stride (ordered)
@@ -166,5 +152,3 @@ impl<'a> Iterator for IterMut<'a> {
 //
 // save all...
 // calculate on-demand
-
-

@@ -1,5 +1,4 @@
-use crate::autodiff::Var;
-
+use crate::autodiff::var::Var;
 use std::collections::HashMap;
 use std::ops::Deref;
 
@@ -21,7 +20,6 @@ impl Sgd {
 
 impl Optimizer for Sgd {
     fn update(&self, grads: HashMap<Var, Var>) {
-
         for (param, grad) in grads {
             let grad_tensor = grad.data();
 

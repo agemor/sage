@@ -1,10 +1,11 @@
 use rand_distr::{Normal, Uniform};
 
-use crate::shape::ToShape;
+use crate::tensor::shape::ToShape;
 use crate::tensor::Tensor;
 
 pub fn kaiming_uniform<S>(shape: S, gain: f32) -> Tensor
-    where S: ToShape
+where
+    S: ToShape,
 {
     let shape = shape.to_shape();
 
@@ -16,7 +17,8 @@ pub fn kaiming_uniform<S>(shape: S, gain: f32) -> Tensor
 }
 
 pub fn kaiming_normal<S>(shape: S, gain: f32) -> Tensor
-    where S: ToShape
+where
+    S: ToShape,
 {
     let shape = shape.to_shape();
 
@@ -26,9 +28,9 @@ pub fn kaiming_normal<S>(shape: S, gain: f32) -> Tensor
     Tensor::from_dist(shape, Normal::new(0.0, std).unwrap())
 }
 
-
 fn fan_in_and_out<S>(shape: S) -> (usize, usize)
-    where S: ToShape
+where
+    S: ToShape,
 {
     let shape = shape.to_shape();
 

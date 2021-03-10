@@ -12,25 +12,22 @@
 #[macro_use]
 extern crate impl_ops;
 
+use autodiff::ops;
+use data::mnist::Mnist;
+
 use crate::autodiff::{diff, Var};
 use crate::data::Dataset;
 use crate::layers::activations::Relu;
-use crate::layers::{Affine, Layer, Sequential};
-use crate::mnist::Mnist;
+use crate::layers::{Affine, Sequential, Stackable};
 use crate::optimizers::Optimizer;
 
 mod autodiff;
 mod data;
+mod example_models;
 mod layers;
-mod mnist;
-mod models;
-mod ops;
-mod optimizers;
-mod session;
-mod shape;
-mod sim;
+mod optim;
+mod paper_experiments;
 mod tensor;
-mod var;
 
 fn main() {
     // Load dataset
@@ -103,8 +100,9 @@ fn accuracy(logits: &Var, labels: &Var) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::tensor::Tensor;
+
+    use super::*;
 
     #[test]
     fn test_grad() {

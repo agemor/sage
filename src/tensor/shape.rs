@@ -1,16 +1,14 @@
-use std::{slice, fmt};
+use std::fmt::Formatter;
 use std::ops::{Index, IndexMut};
-use std::fmt::{Formatter};
+use std::{fmt, slice};
 
 const MAX_SHAPE_LEN: usize = 9;
 
-// simple arrayvec
 #[derive(Copy, Clone, Debug)]
 pub struct Shape {
     sizes: [usize; MAX_SHAPE_LEN],
     len: usize,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct ShapeError {
@@ -25,14 +23,15 @@ impl ShapeError {
     }
 
     pub fn invalid_broadcast(a: Shape, b: Shape) -> Self {
-        ShapeError::new(&*format!("invalid broadcast: {} and {} are not compatible", a, b))
+        ShapeError::new(&*format!(
+            "invalid broadcast: {} and {} are not compatible",
+            a, b
+        ))
     }
 }
 
-
 impl Shape {
-    pub fn new(sizes: &[usize]) -> Self
-    {
+    pub fn new(sizes: &[usize]) -> Self {
         if check_zero_sizes(sizes) {
             panic!("zero-length dimension is not allowed");
         }
@@ -45,24 +44,30 @@ impl Shape {
     }
 
     pub fn empty() -> Self {
-        Shape { sizes: [1; MAX_SHAPE_LEN], len: 0 }
+        Shape {
+            sizes: [1; MAX_SHAPE_LEN],
+            len: 0,
+        }
     }
 
     pub fn union<S, T>(shape_a: S, shape_b: T) -> Result<Self, ShapeError>
-        where S: ToShape,
-              T: ToShape
+    where
+        S: ToShape,
+        T: ToShape,
     {
         let shape_a = shape_a.to_shape();
         let shape_b = shape_b.to_shape();
 
-
         if shape_a == shape_b {
             Ok(shape_a)
         }
-
         // Do union
         else {
-            let (longer, shorter) = if shape_a.len() > shape_b.len() { (shape_a, shape_b) } else { (shape_b, shape_a) };
+            let (longer, shorter) = if shape_a.len() > shape_b.len() {
+                (shape_a, shape_b)
+            } else {
+                (shape_b, shape_a)
+            };
 
             let mut u = shorter;
 
@@ -84,7 +89,8 @@ impl Shape {
     }
 
     pub fn default_strides<S>(shape: S) -> Vec<usize>
-        where S: ToShape
+    where
+        S: ToShape,
     {
         let mut strides = vec![1_usize];
         let mut cum_prod = 1;
@@ -99,7 +105,6 @@ impl Shape {
         strides.reverse();
         strides
     }
-
 
     pub fn len(&self) -> usize {
         self.len
@@ -126,7 +131,8 @@ impl Shape {
     }
 
     pub fn insert<I>(&mut self, axis: I, size: usize) -> &mut Self
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.len + 1);
         if size == 0 {
@@ -136,7 +142,6 @@ impl Shape {
         if MAX_SHAPE_LEN <= axis {
             panic!("axis exceeds maximum shape len");
         }
-
 
         let mut i = self.len;
         while i > axis {
@@ -150,7 +155,8 @@ impl Shape {
     }
 
     pub fn remove<I>(&mut self, axis: I) -> &mut Self
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.len);
 
@@ -164,8 +170,9 @@ impl Shape {
     }
 
     pub fn swap<I, J>(&mut self, axis_a: I, axis_b: J) -> &mut Self
-        where I: ToIndex,
-              J: ToIndex
+    where
+        I: ToIndex,
+        J: ToIndex,
     {
         let axis_a = axis_a.to_index(self.len);
         let axis_b = axis_b.to_index(self.len);
@@ -175,7 +182,8 @@ impl Shape {
     }
 
     pub fn replace<I>(&mut self, axis: I, size: usize) -> &mut Self
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.len);
         if size == 0 {
@@ -186,7 +194,8 @@ impl Shape {
     }
 
     pub fn split<I>(&self, axis: I) -> (Shape, Shape)
-        where I: ToIndex
+    where
+        I: ToIndex,
     {
         let axis = axis.to_index(self.len + 1);
 
@@ -195,7 +204,8 @@ impl Shape {
     }
 
     pub fn extend<S>(&mut self, shape: S) -> &mut Self
-        where S: ToShape
+    where
+        S: ToShape,
     {
         let shape = shape.to_shape();
 
@@ -211,18 +221,19 @@ impl Shape {
     }
 }
 
-
 fn check_zero_sizes(sizes: &[usize]) -> bool {
-    sizes.iter().any(|d| { *d == 0 })
+    sizes.iter().any(|d| *d == 0)
 }
-
 
 impl IntoIterator for Shape {
     type Item = usize;
     type IntoIter = Iter;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter { shape: self, index: 0 }
+        Iter {
+            shape: self,
+            index: 0,
+        }
     }
 }
 
@@ -259,7 +270,6 @@ impl ToShape for &Shape {
     }
 }
 
-
 // array literal
 impl<const C: usize> ToShape for [usize; C] {
     fn to_shape(&self) -> Shape {
@@ -280,7 +290,6 @@ impl ToShape for Vec<usize> {
         Shape::new(self)
     }
 }
-
 
 impl Index<usize> for Shape {
     type Output = usize;
@@ -313,12 +322,11 @@ impl fmt::Display for Shape {
             write!(f, "[{}", self.sizes[0]);
             for s in self.sizes().iter().skip(1) {
                 write!(f, ", {}", s);
-            };
+            }
             write!(f, "]")
         }
     }
 }
-
 
 pub trait ToIndex {
     fn to_index(&self, bound: usize) -> usize;
@@ -359,10 +367,12 @@ fn assert_index_bounds(index: isize, bound: usize) {
     let lower = -bound;
 
     if index > upper || index < lower {
-        panic!(format!("index out of range: expected index in range of {}..{}, but {} is given.", lower, upper, index));
+        panic!(format!(
+            "index out of range: expected index in range of {}..{}, but {} is given.",
+            lower, upper, index
+        ));
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -431,17 +441,22 @@ mod tests {
         assert_eq!(*a.extend(b), orig);
     }
 
-
     #[test]
     fn test_union() {
         let a = [3, 3, 3, 1, 1, 1, 3, 3, 3].to_shape();
         let b = [1, 1, 1, 3, 7, 3, 1, 1, 1].to_shape();
 
-        assert_eq!(Shape::union(a, b).unwrap(), [3, 3, 3, 3, 7, 3, 3, 3, 3].to_shape());
+        assert_eq!(
+            Shape::union(a, b).unwrap(),
+            [3, 3, 3, 3, 7, 3, 3, 3, 3].to_shape()
+        );
     }
 
     #[test]
     fn test_default_strides() {
-        assert_eq!(Shape::default_strides([2, 2, 2, 2, 2]), vec![16, 8, 4, 2, 1]);
+        assert_eq!(
+            Shape::default_strides([2, 2, 2, 2, 2]),
+            vec![16, 8, 4, 2, 1]
+        );
     }
 }

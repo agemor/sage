@@ -1,4 +1,4 @@
-use crate::shape::{ToIndex, ToShape};
+use crate::tensor::shape::{ToIndex, ToShape};
 use crate::tensor::Tensor;
 use num_traits::FromPrimitive;
 
@@ -190,10 +190,13 @@ mod test {
 
     #[test]
     fn test_argmax() {
-
-        let a = Tensor::from_slice([3, 5], &[ 0.37894, -1.43962, -0.03472,  1.50011,  1.10574,  1.20776, -0.74392,
-            -0.10786,  0.48039, -0.82024, -0.62761, -0.94768,  0.75950,  1.23026,
-            1.93393]);
+        let a = Tensor::from_slice(
+            [3, 5],
+            &[
+                0.37894, -1.43962, -0.03472, 1.50011, 1.10574, 1.20776, -0.74392, -0.10786,
+                0.48039, -0.82024, -0.62761, -0.94768, 0.75950, 1.23026, 1.93393,
+            ],
+        );
 
         let b = Tensor::from_slice([5], &[1., 1., 2., 0., 2.]);
 

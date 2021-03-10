@@ -1,3 +1,5 @@
+mod datasets;
+
 pub trait Dataset {
     type Item;
 

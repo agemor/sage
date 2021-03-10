@@ -1,9 +1,15 @@
-use crate::autodiff::{RuntimeProfile, Var};
+// computational costs of each function
+// profiled manually
+
+// backward graph
+
+use crate::autodiff::var::RuntimeProfile;
+use crate::autodiff::Var;
 use std::collections::HashSet;
 use std::time::Instant;
 
 // Variable evaluation session
-pub struct Session {
+pub struct Sim {
     mem_budget: usize,
 
     targets: Vec<Var>,
@@ -11,9 +17,17 @@ pub struct Session {
     resolved: HashSet<Var>,
 }
 
-impl Session {
+///
+/// benchmark result
+/// [30, 10] -> 33
+/// [1000, 200] -> 331
+///
+/// (batch, input size)
+/// polynomial regression
+
+impl Sim {
     pub fn with_budget(targets: Vec<Var>, mem_budget: usize) -> Self {
-        Session {
+        Sim {
             mem_budget,
             targets,
             resolved: HashSet::new(),
@@ -21,13 +35,12 @@ impl Session {
     }
 
     // evaluate vars
-    pub fn eval(&mut self) {
+    pub fn start(&mut self) {
         // default work stack
         let mut stack = Vec::<Var>::new();
 
         // initialize stack with target variables
         stack.extend(self.targets.clone());
-
 
         while !stack.is_empty() {
             let var = stack.last().cloned().unwrap();
@@ -47,7 +60,6 @@ impl Session {
 
                 // ready to evaluate!
                 if unevaluated.is_empty() {
-
                     // exceeds mem budget?
                     if op.mem_req() > self.mem_budget {
                         // Let's start with something basic.

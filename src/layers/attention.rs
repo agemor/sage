@@ -1,19 +1,19 @@
-use crate::autodiff::Var;
-use crate::layers::{gather_params, Affine, Layer};
-use crate::models::common::{Dropout, LayerNorm, Softmax};
-use crate::ops::{matmul, sqrt, transpose};
+use crate::autodiff::var::Var;
+use crate::layers::base::{Dense, Dropout, Softmax};
+use crate::layers::normalization::LayerNorm;
+use crate::layers::{gather_params, Parameter, Stackable};
 
 pub struct MultiHeadAttention {
     embed_dim: usize,
     head_dim: usize,
     num_heads: usize,
 
-    key_proj: Affine,
-    query_proj: Affine,
-    value_proj: Affine,
+    key_proj: Dense,
+    query_proj: Dense,
+    value_proj: Dense,
 
     attn_softmax: Softmax,
-    dense: Affine,
+    dense: Dense,
     dropout: Dropout,
     norm: LayerNorm,
 }
@@ -24,17 +24,17 @@ impl MultiHeadAttention {
             embed_dim,
             head_dim: embed_dim / num_heads,
             num_heads,
-            key_proj: Affine::new(embed_dim, embed_dim),
-            query_proj: Affine::new(embed_dim, embed_dim),
-            value_proj: Affine::new(embed_dim, embed_dim),
+            key_proj: Dense::new(embed_dim, embed_dim),
+            query_proj: Dense::new(embed_dim, embed_dim),
+            value_proj: Dense::new(embed_dim, embed_dim),
             attn_softmax: Softmax::new(-1),
-            dense: Affine::new(embed_dim, embed_dim),
+            dense: Dense::new(embed_dim, embed_dim),
             dropout: Dropout::new(dropout_prob),
             norm: LayerNorm::new([embed_dim], layer_norm_eps),
         }
     }
 
-    pub fn forward_with(&self, x: &Var, attn_mask: &Var) -> Var {
+    pub fn forward(&self, x: &Var, attn_mask: &Var) -> Var {
         // (N, L, E) -> (N, L, num_heads * head_dim)
         let query = self.query_proj.forward(x);
         let key = self.key_proj.forward(x);
@@ -47,7 +47,7 @@ impl MultiHeadAttention {
 
         // Calculate the attention scores
         // (N, num_heads, L, head_dim) * (N, num_head, head_dim, L) -> (N, num_head, L, L)
-        let attention = query.matmul(&key.transpose(-1, -2)) / self.head_dim.sqrt();
+        let attention = query.matmul(key.transpose(-1, -2)) / self.head_dim.sqrt();
 
         // Apply softmax to the attention scores
         let attention = self
@@ -100,7 +100,7 @@ impl MultiHeadAttention {
     }
 }
 
-impl Layer for MultiHeadAttention {
+impl Parameter for MultiHeadAttention {
     fn init(&self) {
         // init
         self.key_proj.init();
@@ -108,10 +108,6 @@ impl Layer for MultiHeadAttention {
         self.value_proj.init();
         self.dense.init();
         self.norm.init();
-    }
-
-    fn forward(&self, x: &Var) -> Var {
-        panic!("use forward_with");
     }
 
     fn params(&self) -> Option<Vec<&Var>> {

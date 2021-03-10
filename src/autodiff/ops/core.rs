@@ -1,7 +1,8 @@
-use crate::autodiff::{Operator, Var};
-use crate::shape::{Shape, ToIndex, ToShape};
+use crate::autodiff::ops::Operator;
+use crate::autodiff::var::{ToVar, Var};
+use crate::tensor::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
-use std::{cmp, ops};
+use std::cmp;
 
 // basic arithmetics
 struct Add;
@@ -42,17 +43,6 @@ struct SumTo {
 
 struct BroadcastTo {
     shape: Shape,
-}
-
-// matrix operations
-struct Matmul;
-
-struct Matvec;
-
-// shaping operations
-struct Transpose {
-    axis_a: usize,
-    axis_b: usize,
 }
 
 struct Reshape {
@@ -100,28 +90,7 @@ struct Squeeze {
     axis: usize,
 }
 
-// activations
-struct Relu;
-
-struct Binarize {
-    threshold: f32,
-}
-
-// softmax
-struct Softmax {
-    axis: usize,
-}
-
-// loss functions
-struct SoftmaxCrossEntropy;
-
 // math operations
-
-struct Reciprocal;
-
-struct Sqrt;
-
-struct Pow;
 
 impl Operator<2> for Add {
     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
@@ -143,8 +112,8 @@ impl Operator<2> for Add {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(gy, x0.shape());
-        let gx1 = sum_to(gy, x1.shape());
+        let gx0 = gy.sum_to(x0.shape());
+        let gx1 = gy.sum_to(x1.shape());
 
         [gx0, gx1]
     }
@@ -170,8 +139,8 @@ impl Operator<2> for Sub {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(gy, &x0.shape());
-        let gx1 = sum_to(&-gy, &x1.shape());
+        let gx0 = gy.sum_to(x0.shape());
+        let gx1 = -gy.sum_to(x1.shape());
 
         [gx0, gx1]
     }
@@ -184,7 +153,8 @@ impl Operator<1> for Neg {
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
-        Var::from_unary_op(x[0].shape(), self, x[0])
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
@@ -213,8 +183,8 @@ impl Operator<2> for Mul {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(&(gy * x1), x0.shape());
-        let gx1 = sum_to(&(gy * x0), x1.shape());
+        let gx0 = (gy * x1).sum_to(x0.shape());
+        let gx1 = (gy * x0).sum_to(x1.shape());
 
         [gx0, gx1]
     }
@@ -239,8 +209,8 @@ impl Operator<2> for Div {
         let x0 = x[0];
         let x1 = x[1];
 
-        let gx0 = sum_to(&(gy / x1), &x0.shape());
-        let gx1 = sum_to(&(-(gy * x0) / (x1 * x1)), &x1.shape());
+        let gx0 = (gy / x1).sum_to(x0.shape());
+        let gx1 = (-(gy * x0) / (x1 * x1)).sum_to(x1.shape());
 
         [gx0, gx1]
     }
@@ -258,7 +228,7 @@ impl Operator<1> for ScalarAdd {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = identity(gy);
+        let gx = gy.clone();
         [gx]
     }
 }
@@ -275,7 +245,7 @@ impl Operator<1> for ScalarSub {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = identity(gy);
+        let gx = gy.clone();
         [gx]
     }
 }
@@ -336,7 +306,7 @@ impl Operator<1> for Sum {
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x = x[0];
-        let gx = broadcast_to(gy, x.shape());
+        let gx = gy.broadcast_to(x.shape());
 
         [gx]
     }
@@ -383,7 +353,7 @@ impl Operator<1> for SumTo {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = broadcast_to(gy, self.shape);
+        let gx = gy.broadcast_to(self.shape);
         [gx]
     }
 }
@@ -408,139 +378,7 @@ impl Operator<1> for BroadcastTo {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = sum_to(gy, self.shape);
-        [gx]
-    }
-}
-
-impl Operator<2> for Matmul {
-    fn compute(&self, x: [&Tensor; 2]) -> Tensor {
-        let x0 = x[0];
-        let x1 = x[1];
-
-        x0.matmul(x1)
-    }
-
-    fn forward(self, x: [&Var; 2]) -> Var {
-        let x0 = x[0];
-        let x1 = x[1];
-
-        if x0.rank() < 2 || x1.rank() < 2 {
-            panic!("should provide a matrix");
-        }
-
-        if x0.shape()[x0.rank() - 1] != x1.shape()[x1.rank() - 2] {
-            panic!("matrix not compatible");
-        }
-
-        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
-        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
-
-        // shape broadcast
-        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
-
-        // add matrix dim
-        batch.insert(-1, x0.shape()[x0.rank() - 2]);
-        batch.insert(-1, x1.shape()[x1.rank() - 1]);
-
-        Var::from_binary_op(batch, self, [x0, x1])
-    }
-
-    fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
-        // (*, A, B)
-        let x0 = x[0];
-
-        // (*, B, C)
-        let x1 = x[1];
-
-        // gy: (*, A, C)
-
-        // (*, A, B) = (*, A, C) (*, C, B)
-        let gx0 = sum_to(&matmul(gy, &transpose(x1, -1, -2)), x0.shape());
-
-        // (*, B, C) = (*, B, A) (*, A, C)
-        let gx1 = sum_to(&matmul(&transpose(x0, -1, -2), gy), x1.shape());
-
-        [gx0, gx1]
-    }
-}
-
-impl Operator<2> for Matvec {
-    fn compute(&self, x: [&Tensor; 2]) -> Tensor {
-        let x0 = x[0];
-        let x1 = x[1];
-
-        x0.matvec(x1)
-    }
-
-    fn forward(self, x: [&Var; 2]) -> Var {
-        let x0 = x[0];
-        let x1 = x[1];
-
-        if x0.rank() < 2 || x1.rank() < 1 {
-            panic!("invalid matrix or vector");
-        }
-
-        if x0.shape()[x0.rank() - 1] != x1.shape()[x1.rank() - 1] {
-            panic!("incompatible matrix-vector");
-        }
-
-        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
-        let (x1_batch, _) = x1.shape().split(x1.rank() - 1);
-
-        // shape broadcast
-        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
-
-        // add matrix dim
-        batch.insert(-1, x0.shape()[x0.rank() - 2]);
-
-        Var::from_binary_op(batch, self, [x0, x1])
-    }
-
-    fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
-        // (*, A, B)
-        let x0 = x[0];
-
-        // (*, B)
-        let x1 = x[1];
-
-        // gy: (*, A)
-
-        // (*, A, B) = (*, A, 1) (*, 1, B)
-        let gx0 = sum_to(
-            &matmul(&expand(gy, gy.rank()), &expand(x1, x1.rank() - 1)),
-            x0.shape(),
-        );
-
-        // (*, B) = (*, B, A) (*, A)
-        let gx1 = sum_to(&matvec(&transpose(x0, -1, -2), gy), x1.shape());
-
-        [gx0, gx1]
-    }
-}
-
-// Swap last two components of tensor
-impl Operator<1> for Transpose {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        let x = x[0];
-        x.transpose(self.axis_a, self.axis_b)
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-
-        if x.rank() < 2 {
-            panic!("cannot transpose on a vector");
-        }
-
-        let mut shape = x.shape();
-        shape.swap(self.axis_a, self.axis_b);
-
-        Var::from_unary_op(shape, self, x)
-    }
-
-    fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = transpose(gy, self.axis_a, self.axis_b);
+        let gx = gy.sum_to(self.shape);
         [gx]
     }
 }
@@ -565,7 +403,7 @@ impl Operator<1> for Reshape {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = reshape(gy, self.from);
+        let gx = gy.reshape(self.from);
         [gx]
     }
 }
@@ -590,7 +428,7 @@ impl Operator<1> for SelectIndex {
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x: &Var = x[0];
         let orig_size = x.shape()[self.axis];
-        let gx = unselect_index(gy, self.index, orig_size, self.axis);
+        let gx = gy.unselect_index(self.index, orig_size, self.axis);
         [gx]
     }
 }
@@ -612,7 +450,7 @@ impl Operator<1> for UnselectIndex {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = select_index(gy, self.index, self.axis);
+        let gx = gy.index(self.index, self.axis);
         [gx]
     }
 }
@@ -637,7 +475,7 @@ impl Operator<1> for SelectSlice {
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x: &Var = x[0];
         let orig_size = x.shape()[self.axis];
-        let gx = unselect_slice(gy, self.index, self.slice_size, orig_size, self.axis);
+        let gx = gy.unselect_slice(self.index, self.slice_size, orig_size, self.axis);
         [gx]
     }
 }
@@ -659,7 +497,7 @@ impl Operator<1> for UnselectSlice {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = select_slice(gy, self.index, self.slice_size, self.axis);
+        let gx = gy.slice(self.index, self.slice_size, self.axis);
         [gx]
     }
 }
@@ -697,8 +535,8 @@ impl Operator<2> for Concat {
         let x0_slice_size = x0.shape()[self.axis];
         let x1_slice_size = x1.shape()[self.axis];
 
-        let gx0 = select_slice(gy, 0, x0_slice_size, self.axis);
-        let gx1 = select_slice(gy, x0_slice_size, x1_slice_size, self.axis);
+        let gx0 = gy.slice(0, x0_slice_size, self.axis);
+        let gx1 = gy.slice(x0_slice_size, x1_slice_size, self.axis);
 
         [gx0, gx1]
     }
@@ -719,7 +557,7 @@ impl Operator<1> for Expand {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = squeeze(gy, self.axis);
+        let gx = gy.squeeze(self.axis);
         [gx]
     }
 }
@@ -739,422 +577,240 @@ impl Operator<1> for Squeeze {
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = expand(gy, self.axis);
+        let gx = gy.unsqueeze(self.axis);
         [gx]
     }
 }
 
-impl Operator<1> for Relu {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        let x = x[0];
-        x.map(|&x| if x > 0.0 { x } else { 0.0 })
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
-    }
-
-    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let x = x[0];
-        let gx = mul(gy, &binarize(x, 0.0));
-        [gx]
-    }
+pub fn add<V: ToVar, W: ToVar>(a: V, b: W) -> Var {
+    Add.forward([&a.to_var(), &b.to_var()])
 }
 
-impl Operator<1> for Binarize {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        let x = x[0];
-
-        x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
-    }
-
-    fn backward(&self, _x: [&Var; 1], _gy: &Var) -> [Var; 1] {
-        panic!("this operation is not differentiable");
-    }
+pub fn sub<V: ToVar, W: ToVar>(a: V, b: W) -> Var {
+    Sub.forward([&a.to_var(), &b.to_var()])
 }
 
-impl Operator<1> for Softmax {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        let x = x[0];
-
-        x.softmax(self.axis)
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
-    }
-
-    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let x = x[0];
-        let y = softmax(x, self.axis);
-
-        let mut gx = &y * gy;
-        gx = &gx - &y * &sum(&gx, self.axis, true);
-
-        [gx]
-    }
+pub fn neg<V: ToVar>(x: V) -> Var {
+    Neg.forward([&x.to_var()])
 }
 
-// (N, C) (N, C) -> (N)
-impl Operator<2> for SoftmaxCrossEntropy {
-    fn compute(&self, x: [&Tensor; 2]) -> Tensor {
-        let x0 = x[0];
-        let t = x[1];
+pub fn mul<V: ToVar, W: ToVar>(a: V, b: W) -> Var {
+    Mul.forward([&a.to_var(), &b.to_var()])
+}
 
-        let log_z = x0 - x0.log_sum_exp(1, true); // ln10
-        let log_p = log_z * t;
-        -log_p.sum_axis(1, false)
-    }
+pub fn div<V: ToVar, W: ToVar>(a: V, b: W) -> Var {
+    Div.forward([&a.to_var(), &b.to_var()])
+}
 
-    fn forward(self, x: [&Var; 2]) -> Var {
-        let x0 = x[0];
-        let x1 = x[1];
+pub fn scalar_add<V: ToVar>(x: V, scalar: f32) -> Var {
+    ScalarAdd { scalar }.forward([&x.to_var()])
+}
 
-        if x0.shape() != x1.shape() {
-            panic!("shape does not match");
+pub fn scalar_sub<V: ToVar>(x: V, scalar: f32) -> Var {
+    ScalarSub { scalar }.forward([&x.to_var()])
+}
+
+pub fn scalar_mul<V: ToVar>(x: V, scalar: f32) -> Var {
+    ScalarMul { scalar }.forward([&x.to_var()])
+}
+
+pub fn scalar_div<V: ToVar>(x: V, scalar: f32) -> Var {
+    ScalarDiv { scalar }.forward([&x.to_var()])
+}
+
+impl Var {
+    pub fn sum<I>(&self, axis: I, retain_axis: bool) -> Var
+    where
+        I: ToIndex,
+    {
+        Sum {
+            axis: axis.to_index(self.rank()),
+            retain_axis,
         }
-
-        let mut shape = x0.shape();
-        shape.remove(-1);
-
-        Var::from_binary_op(shape, self, [x0, x1])
+        .forward([self])
     }
 
-    fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
-        let x0 = x[0];
-        let t = x[1];
-
-        let sm = softmax(x0, 1);
-
-        let n = x0.shape()[0] as f32;
-        // y: [N]
-        // (N, k) - (N, k) * (N, 1)
-
-        let gx0 = (sm - t) * expand(gy, 1) / n;
-        [gx0, t.clone()]
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-impl Operator<1> for Reciprocal {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
+    pub fn sum_to<S>(&self, shape: S) -> Var
+    where
+        S: ToShape,
+    {
+        let shape = shape.to_shape();
+        if self.shape() == shape {
+            self.clone()
+        } else {
+            SumTo { shape }.forward([self])
+        }
     }
 
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
+    pub fn broadcast_to<S>(&self, shape: S) -> Var
+    where
+        S: ToShape,
+    {
+        let shape = shape.to_shape();
+        if self.shape() == shape {
+            self.clone()
+        } else {
+            BroadcastTo { shape }.forward([self])
+        }
     }
 
-    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        unimplemented!()
-    }
-}
-
-impl Operator<1> for Sqrt {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
+    pub fn transpose<I, J>(&self, axis_a: I, axis_b: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        Transpose {
+            axis_a: axis_a.to_index(self.rank()),
+            axis_b: axis_b.to_index(self.rank()),
+        }
+        .forward([self])
     }
 
-    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let x = x[0];
-        let gx = div(gy, &scalar_mul(&sqrt(x), 2.0));
-        [gx]
-    }
-}
-
-impl Operator<1> for Pow {
-    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
-    }
-
-    fn forward(self, x: [&Var; 1]) -> Var {
-        let x = x[0];
-        Var::from_unary_op(x.shape(), self, x)
+    pub fn reshape<S>(&self, shape: S) -> Var
+    where
+        S: ToShape,
+    {
+        Reshape {
+            from: self.shape(),
+            to: shape.to_shape(),
+        }
+        .forward([self])
     }
 
-    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        unimplemented!()
+    pub fn concat<V, I>(&self, other: V, axis: I) -> Var
+    where
+        V: ToVar,
+        I: ToIndex,
+    {
+        let v = other.to_var();
+        Concat {
+            axis: axis.to_index(cmp::min(self.rank(), v.rank())),
+        }
+        .forward([self, &v1])
     }
-}
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+    pub fn index<I, J>(&self, index: I, axis: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
 
-pub fn identity(x: &Var) -> Var {
-    x.clone()
-}
-
-pub fn add(a: &Var, b: &Var) -> Var {
-    Add.forward([a, b])
-}
-
-pub fn sub(a: &Var, b: &Var) -> Var {
-    Sub.forward([a, b])
-}
-
-pub fn neg(x: &Var) -> Var {
-    Neg.forward([x])
-}
-
-pub fn mul(a: &Var, b: &Var) -> Var {
-    Mul.forward([a, b])
-}
-
-pub fn div(a: &Var, b: &Var) -> Var {
-    Div.forward([a, b])
-}
-
-pub fn scalar_add(x: &Var, scalar: f32) -> Var {
-    ScalarAdd { scalar }.forward([x])
-}
-
-pub fn scalar_sub(x: &Var, scalar: f32) -> Var {
-    ScalarSub { scalar }.forward([x])
-}
-
-pub fn scalar_mul(x: &Var, scalar: f32) -> Var {
-    ScalarMul { scalar }.forward([x])
-}
-
-pub fn scalar_div(x: &Var, scalar: f32) -> Var {
-    ScalarDiv { scalar }.forward([x])
-}
-
-pub fn sum<I>(x: &Var, axis: I, retain_axis: bool) -> Var
-where
-    I: ToIndex,
-{
-    Sum {
-        axis: axis.to_index(x.rank()),
-        retain_axis,
+        SelectIndex {
+            index: index.to_index(self.shape()[axis]),
+            axis,
+        }
+        .forward([self])
     }
-    .forward([x])
-}
 
-pub fn sum_to<S>(x: &Var, shape: S) -> Var
-where
-    S: ToShape,
-{
-    let shape = shape.to_shape();
-    if x.shape() == shape {
-        identity(x)
-    } else {
-        SumTo { shape }.forward([x])
+    fn unselect_index<I, J>(&self, index: I, size: usize, axis: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        UnselectIndex {
+            index: index.to_index(self.shape()[axis]),
+            size,
+            axis,
+        }
+        .forward([self])
     }
-}
 
-pub fn broadcast_to<S>(x: &Var, shape: S) -> Var
-where
-    S: ToShape,
-{
-    let shape = shape.to_shape();
-    if x.shape() == shape {
-        identity(x)
-    } else {
-        BroadcastTo { shape }.forward([x])
+    pub fn slice<I, J>(&self, index: I, slice_size: usize, axis: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        SelectSlice {
+            index: index.to_index(self.shape()[axis]),
+            slice_size,
+            axis,
+        }
+        .forward([self])
+    }
+
+    fn unselect_slice<I, J>(&self, index: I, slice_size: usize, size: usize, axis: J) -> Var
+    where
+        I: ToIndex,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        UnselectSlice {
+            index: index.to_index(self.shape()[axis]),
+            slice_size,
+            size,
+            axis,
+        }
+        .forward([self])
+    }
+
+    pub fn squeeze<I>(&self, axis: I) -> Var
+    where
+        I: ToIndex,
+    {
+        Squeeze {
+            axis: axis.to_index(self.rank()),
+        }
+        .forward([self])
+    }
+
+    pub fn unsqueeze<I>(&self, axis: I) -> Var
+    where
+        I: ToIndex,
+    {
+        Expand {
+            axis: axis.to_index(self.rank() + 1),
+        }
+        .forward([self])
     }
 }
 
-pub fn matmul(x0: &Var, x1: &Var) -> Var {
-    Matmul.forward([x0, x1])
-}
-
-pub fn matvec(x0: &Var, x1: &Var) -> Var {
-    Matvec.forward([x0, x1])
-}
-
-pub fn matvec_simple(x0: &Var, x1: &Var) -> Var {
-    squeeze(&matmul(x0, &expand(x1, -1)), -1)
-}
-
-pub fn transpose<I, J>(x: &Var, axis_a: I, axis_b: J) -> Var
-where
-    I: ToIndex,
-    J: ToIndex,
-{
-    Transpose {
-        axis_a: axis_a.to_index(x.rank()),
-        axis_b: axis_b.to_index(x.rank()),
-    }
-    .forward([x])
-}
-
-pub fn reshape<S>(x: &Var, shape: S) -> Var
-where
-    S: ToShape,
-{
-    Reshape {
-        from: x.shape(),
-        to: shape.to_shape(),
-    }
-    .forward([x])
-}
-
-pub fn concat<I: ToIndex>(x0: &Var, x1: &Var, axis: I) -> Var {
-    Concat {
-        axis: axis.to_index(cmp::min(x0.rank(), x1.rank())),
-    }
-    .forward([x0, x1])
-}
-
-pub fn select_index<I: ToIndex, J: ToIndex>(x: &Var, index: I, axis: J) -> Var {
-    let axis = axis.to_index(x.rank());
-
-    SelectIndex {
-        index: index.to_index(x.shape()[axis]),
-        axis,
-    }
-    .forward([x])
-}
-
-pub fn unselect_index<I: ToIndex, J: ToIndex>(x: &Var, index: I, size: usize, axis: J) -> Var {
-    let axis = axis.to_index(x.rank());
-
-    UnselectIndex {
-        index: index.to_index(x.shape()[axis]),
-        size,
-        axis,
-    }
-    .forward([x])
-}
-
-pub fn select_slice<I: ToIndex, J: ToIndex>(x: &Var, index: I, slice_size: usize, axis: J) -> Var {
-    let axis = axis.to_index(x.rank());
-
-    SelectSlice {
-        index: index.to_index(x.shape()[axis]),
-        slice_size,
-        axis,
-    }
-    .forward([x])
-}
-
-pub fn unselect_slice<I: ToIndex, J: ToIndex>(
-    x: &Var,
-    index: I,
-    slice_size: usize,
-    size: usize,
-    axis: J,
-) -> Var {
-    let axis = axis.to_index(x.rank());
-
-    UnselectSlice {
-        index: index.to_index(x.shape()[axis]),
-        slice_size,
-        size,
-        axis,
-    }
-    .forward([x])
-}
-
-pub fn expand<I>(x: &Var, axis: I) -> Var
-where
-    I: ToIndex,
-{
-    Expand {
-        axis: axis.to_index(x.rank() + 1),
-    }
-    .forward([x])
-}
-
-pub fn squeeze<I>(x: &Var, axis: I) -> Var
-where
-    I: ToIndex,
-{
-    Squeeze {
-        axis: axis.to_index(x.rank()),
-    }
-    .forward([x])
-}
-
-pub fn relu(x: &Var) -> Var {
-    Relu.forward([x])
-}
-
-pub fn binarize(x: &Var, threshold: f32) -> Var {
-    Binarize { threshold }.forward([x])
-}
-
-pub fn softmax<I>(x: &Var, axis: I) -> Var
-where
-    I: ToIndex,
-{
-    Softmax {
-        axis: axis.to_index(x.rank()),
-    }
-    .forward([x])
-}
-
-pub fn softmax_cross_entropy(x: &Var, t: &Var) -> Var {
-    SoftmaxCrossEntropy.forward([x, t])
-}
-
-pub fn reciprocal(x: &Var) -> Var {
-    Reciprocal.forward([x])
-}
-
-pub fn sqrt(x: &Var) -> Var {
-    Sqrt.forward([x])
-}
-
-pub fn pow(x: &Var) -> Var {
-    Pow.forward([x])
-}
-
-impl_op!(+ |a: Var, b: Var| -> Var { add(&a, &b) });
-impl_op!(+ |a: &Var, b: Var| -> Var { add(a, &b) });
-impl_op!(+ |a: Var, b: &Var| -> Var { add(&a, b) });
+impl_op!(+ |a: Var, b: Var| -> Var { add(a, b) });
+impl_op!(+ |a: &Var, b: Var| -> Var { add(a, b) });
+impl_op!(+ |a: Var, b: &Var| -> Var { add(a, b) });
 impl_op!(+ |a: &Var, b: &Var| -> Var { add(a, b) });
 
-impl_op!(+|a: Var, b: f32| -> Var { scalar_add(&a, b) });
+impl_op!(+|a: Var, b: f32| -> Var { scalar_add(a, b) });
 impl_op!(+|a: &Var, b: f32| -> Var { scalar_add(a, b) });
-impl_op!(+|a: f32, b: Var| -> Var { scalar_add(&b, a) });
+impl_op!(+|a: f32, b: Var| -> Var { scalar_add(b, a) });
 impl_op!(+|a: f32, b: &Var| -> Var { scalar_add(b, a) });
 
-impl_op!(-|a: Var, b: Var| -> Var { sub(&a, &b) });
-impl_op!(-|a: &Var, b: Var| -> Var { sub(a, &b) });
-impl_op!(-|a: Var, b: &Var| -> Var { sub(&a, b) });
+impl_op!(-|a: Var, b: Var| -> Var { sub(a, b) });
+impl_op!(-|a: &Var, b: Var| -> Var { sub(a, b) });
+impl_op!(-|a: Var, b: &Var| -> Var { sub(a, b) });
 impl_op!(-|a: &Var, b: &Var| -> Var { sub(a, b) });
 
-impl_op!(-|a: Var, b: f32| -> Var { scalar_sub(&a, b) });
+impl_op!(-|a: Var, b: f32| -> Var { scalar_sub(a, b) });
 impl_op!(-|a: &Var, b: f32| -> Var { scalar_sub(a, b) });
-impl_op!(-|a: f32, b: Var| -> Var { scalar_sub(&b, a) });
+impl_op!(-|a: f32, b: Var| -> Var { scalar_sub(b, a) });
 impl_op!(-|a: f32, b: &Var| -> Var { scalar_sub(b, a) });
 
-impl_op!(*|a: Var, b: Var| -> Var { mul(&a, &b) });
-impl_op!(*|a: &Var, b: Var| -> Var { mul(a, &b) });
-impl_op!(*|a: Var, b: &Var| -> Var { mul(&a, b) });
+impl_op!(*|a: Var, b: Var| -> Var { mul(a, b) });
+impl_op!(*|a: &Var, b: Var| -> Var { mul(a, b) });
+impl_op!(*|a: Var, b: &Var| -> Var { mul(a, b) });
 impl_op!(*|a: &Var, b: &Var| -> Var { mul(a, b) });
 
-impl_op!(*|a: Var, b: f32| -> Var { scalar_mul(&a, b) });
+impl_op!(*|a: Var, b: f32| -> Var { scalar_mul(a, b) });
 impl_op!(*|a: &Var, b: f32| -> Var { scalar_mul(a, b) });
-impl_op!(*|a: f32, b: Var| -> Var { scalar_mul(&b, a) });
+impl_op!(*|a: f32, b: Var| -> Var { scalar_mul(b, a) });
 impl_op!(*|a: f32, b: &Var| -> Var { scalar_mul(b, a) });
 
-impl_op!(/ |a: Var, b: Var| -> Var { div(&a, &b) });
-impl_op!(/ |a: &Var, b: Var| -> Var { div(a, &b) });
-impl_op!(/ |a: Var, b: &Var| -> Var { div(&a, b) });
+impl_op!(/ |a: Var, b: Var| -> Var { div(a, b) });
+impl_op!(/ |a: &Var, b: Var| -> Var { div(a, b) });
+impl_op!(/ |a: Var, b: &Var| -> Var { div(a, b) });
 impl_op!(/ |a: &Var, b: &Var| -> Var { div(a, b) });
 
-impl_op!(/|a: Var, b: f32| -> Var { scalar_div(&a, b) });
+impl_op!(/|a: Var, b: f32| -> Var { scalar_div(a, b) });
 impl_op!(/|a: &Var, b: f32| -> Var { scalar_div(a, b) });
-impl_op!(/|a: f32, b: Var| -> Var { scalar_div(&b, a) });
+impl_op!(/|a: f32, b: Var| -> Var { scalar_div(b, a) });
 impl_op!(/|a: f32, b: &Var| -> Var { scalar_div(b, a) });
 
-impl_op!(-|a: Var| -> Var { neg(&a) });
+impl_op!(-|a: Var| -> Var { neg(a) });
 impl_op!(-|a: &Var| -> Var { neg(a) });
 
 ////////////// unit tests //////////////
