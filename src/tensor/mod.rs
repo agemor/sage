@@ -118,13 +118,8 @@ impl Tensor {
         S: ToShape,
     {
         // materialization of shape
-        let shape = shape.to_shape();
+        let shape = shape.to_shape(v.len());
         let strides = Shape::default_strides(shape);
-
-        // check shape-vector compatibility
-        if shape.size() != v.len() {
-            panic!("shape and vector not compatible")
-        }
 
         Tensor {
             shape,
@@ -139,7 +134,7 @@ impl Tensor {
     where
         S: ToShape,
     {
-        let shape = shape.to_shape();
+        let shape = shape.to_shape(0);
         let v = vec![elem; shape.size()];
         Tensor::from_vec(shape, v)
     }
@@ -150,7 +145,7 @@ impl Tensor {
         S: ToShape,
         T: Distribution<f32>,
     {
-        let shape = shape.to_shape();
+        let shape = shape.to_shape(0);
 
         let mut v = Vec::<f32>::with_capacity(shape.size());
         let mut rng = thread_rng(); //&mut SmallRng::from_rng(thread_rng()).unwrap();
@@ -164,7 +159,7 @@ impl Tensor {
 
     // private
     fn from_ndarray(ndarray: ndarray::ArrayD<f32>) -> Self {
-        let shape = ndarray.shape().to_shape();
+        let shape = ndarray.shape().to_shape(0);
         let strides = ndarray
             .strides()
             .iter()
@@ -194,7 +189,7 @@ impl Tensor {
         S: ToShape,
     {
         Tensor {
-            shape: shape.to_shape(),
+            shape: shape.to_shape(orig.size()),
             strides: strides.to_vec(),
             offset,
             arr: orig.arr.clone(), // this increases reference counter (do not copy actual data)
@@ -535,7 +530,7 @@ mod tests {
     #[test]
     fn test_shape() {
         let a = Tensor::zeros([1, 4, 10]);
-        assert_eq!(a.shape(), [1, 4, 10].to_shape());
+        assert_eq!(a.shape(), [1, 4, 10].to_shape(0));
         assert_eq!(a.shape[0], 1);
         assert_eq!(a.shape[1], 4);
         assert_eq!(a.shape[2], 10);
@@ -598,7 +593,7 @@ mod tests {
         let b = Tensor::ones([3, 2, 5]);
         assert_eq!(
             Tensor::cat(&[&a, &b], 2).unwrap().shape(),
-            [3, 2, 10].to_shape()
+            [3, 2, 10].to_shape(0)
         );
     }
 
@@ -607,16 +602,16 @@ mod tests {
         let a = Tensor::ones([3, 2, 5]);
         let b = Tensor::ones([3, 2, 5]);
         assert_eq!(
-            Tensor::stack(&[a, b], 2).unwrap().shape(),
-            [3, 2, 2, 5].to_shape()
+            Tensor::stack(&[&a, &b], 2).unwrap().shape(),
+            [3, 2, 2, 5].to_shape(0)
         );
     }
 
     #[test]
     fn test_squeeze() {
         let a = Tensor::ones([1, 3, 2, 1]);
-        assert_eq!(a.squeeze(-1).shape(), [1, 3, 2].to_shape());
-        assert_eq!(a.squeeze(0).shape(), [3, 2, 1].to_shape());
+        assert_eq!(a.squeeze(-1).shape(), [1, 3, 2].to_shape(0));
+        assert_eq!(a.squeeze(0).shape(), [3, 2, 1].to_shape(0));
     }
 
     #[test]
@@ -629,10 +624,10 @@ mod tests {
     #[test]
     fn test_expand_dims() {
         let a = Tensor::ones([3, 2, 9]);
-        assert_eq!(a.expand_dims(3).shape(), [3, 2, 9, 1].to_shape());
-        assert_eq!(a.expand_dims(-1).shape(), [3, 2, 9, 1].to_shape());
-        assert_eq!(a.expand_dims(0).shape(), [1, 3, 2, 9].to_shape());
-        assert_eq!(a.expand_dims(1).shape(), [3, 1, 2, 9].to_shape());
+        assert_eq!(a.expand_dims(3).shape(), [3, 2, 9, 1].to_shape(0));
+        assert_eq!(a.expand_dims(-1).shape(), [3, 2, 9, 1].to_shape(0));
+        assert_eq!(a.expand_dims(0).shape(), [1, 3, 2, 9].to_shape(0));
+        assert_eq!(a.expand_dims(1).shape(), [3, 1, 2, 9].to_shape(0));
     }
 
     #[test]
@@ -647,12 +642,12 @@ mod tests {
     #[test]
     fn test_upcast() {
         let a = Tensor::ones([3, 1, 9]);
-        assert_eq!(a.upcast([3, 1, 9]).unwrap().shape(), [3, 1, 9].to_shape());
+        assert_eq!(a.upcast([3, 1, 9]).unwrap().shape(), [3, 1, 9].to_shape(0));
         assert_eq!(a.upcast([3, 1, 9]).unwrap(), Tensor::ones([3, 1, 9]));
 
         assert_eq!(
             a.upcast([10, 3, 7, 9]).unwrap().shape(),
-            [10, 3, 7, 9].to_shape()
+            [10, 3, 7, 9].to_shape(0)
         );
         assert_eq!(
             a.upcast([10, 3, 7, 9]).unwrap(),
@@ -684,9 +679,9 @@ mod tests {
     fn test_along_axis() {
         let a = Tensor::ones([3, 1, 9]);
         a.along_axis(-1)
-            .for_each(|t| assert_eq!(t.shape(), [3, 1].to_shape()));
+            .for_each(|t| assert_eq!(t.shape(), [3, 1].to_shape(0)));
         a.along_axis(0)
-            .for_each(|t| assert_eq!(t.shape(), [1, 9].to_shape()));
+            .for_each(|t| assert_eq!(t.shape(), [1, 9].to_shape(0)));
     }
 
     #[test]

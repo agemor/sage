@@ -12,14 +12,12 @@
 #[macro_use]
 extern crate impl_ops;
 
-use autodiff::ops;
-use data::mnist::Mnist;
-
-use crate::autodiff::{diff, Var};
-use crate::data::Dataset;
+use crate::autodiff::diff;
+use crate::autodiff::var::Var;
 use crate::layers::activations::Relu;
-use crate::layers::{Affine, Sequential, Stackable};
-use crate::optimizers::Optimizer;
+use crate::layers::base::{Dense, Sequential};
+use crate::layers::{Parameter, Stackable};
+use crate::optim::{Optimizer, Sgd};
 
 mod autodiff;
 mod data;
@@ -39,13 +37,13 @@ fn main() {
 
     // Model
     let model = Sequential::from(vec![
-        box Affine::new(784, 128),
+        box Dense::new(784, 128),
         box Relu,
-        box Affine::new(128, 10),
+        box Dense::new(128, 10),
     ]);
 
     // Optimizer
-    let optimizer = optimizers::Sgd::new(0.001);
+    let optimizer = Sgd::new(0.001);
 
     // Initialize model weights and optimizer params
     model.init();

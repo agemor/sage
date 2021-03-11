@@ -89,7 +89,7 @@ impl Var {
         Var {
             node: Rc::new(RefCell::new(VarNode {
                 data: None,
-                shape: s.to_shape(),
+                shape: s.to_shape(0),
                 origin: None,
                 runtime: Some(RuntimeProfile {
                     mem_store: 0,

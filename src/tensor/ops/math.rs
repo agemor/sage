@@ -3,90 +3,6 @@ use crate::tensor::Tensor;
 use num_traits::FromPrimitive;
 
 impl Tensor {
-    pub fn sum(&self) -> f32 {
-        self.logical_iter().sum()
-    }
-
-    pub fn mean(&self) -> f32 {
-        self.logical_iter().sum::<f32>() / (self.size() as f32)
-    }
-
-    pub fn max_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
-    where
-        I: ToIndex,
-    {
-        let axis = axis.to_index(self.rank());
-        let max = self.fold_axis(axis, f32::MIN, |&a, &b| if a > b { a } else { b });
-        if retain_axis {
-            max.expand_dims(axis)
-        } else {
-            max
-        }
-    }
-
-    pub fn sum_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
-    where
-        I: ToIndex,
-    {
-        let axis = axis.to_index(self.rank());
-
-        let mut new_shape = self.shape;
-        new_shape.remove(axis);
-
-        let mut summed = Tensor::zeros(new_shape);
-
-        for t in self.along_axis(axis) {
-            summed = summed + t;
-        }
-
-        if retain_axis {
-            summed.expand_dims(axis)
-        } else {
-            summed
-        }
-    }
-
-    pub fn mean_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
-    where
-        I: ToIndex,
-    {
-        let axis = axis.to_index(self.rank());
-        self.sum_axis(axis, retain_axis) / self.shape[axis] as f32
-    }
-
-    pub fn argmax<I>(&self, axis: I) -> Tensor
-    where
-        I: ToIndex,
-    {
-        let axis = axis.to_index(self.rank());
-
-        let mut folded_shape = self.shape;
-        folded_shape.remove(axis);
-
-        let max_val = Tensor::from_elem(folded_shape, f32::MIN);
-        let max_idx = Tensor::from_elem(folded_shape, 0.0);
-
-        for (i, t) in self.along_axis(axis).enumerate() {
-            t.logical_iter()
-                .zip(max_val.random_iter_mut())
-                .zip(max_idx.random_iter_mut())
-                .for_each(|((x, mx), idx)| {
-                    if x > mx {
-                        *mx = *x;
-                        *idx = f32::from_usize(i).unwrap();
-                    }
-                });
-        }
-        max_idx
-    }
-
-    pub fn argmin<I>(&self, axis: I) -> Tensor
-    where
-        I: ToIndex,
-    {
-        (-self).argmax(axis)
-    }
-
     pub fn softmax<I>(&self, axis: I) -> Tensor
     where
         I: ToIndex,
@@ -128,6 +44,22 @@ impl Tensor {
             sum + max.squeeze(axis)
         }
     }
+
+    pub fn recip(&self) -> Tensor {
+        self.map(|elem| elem.recip())
+    }
+
+    pub fn sqrt(&self) -> Tensor {
+        self.map(|elem| elem.sqrt())
+    }
+
+    pub fn ln(&self) -> Tensor {
+        self.map(|elem| elem.ln())
+    }
+
+    pub fn pow(&self, n: f32) -> Tensor {
+        self.map(|elem| elem.powf(n))
+    }
 }
 
 // math utility methods
@@ -151,57 +83,17 @@ pub fn neg(a: &Tensor) -> Tensor {
     a.map(|&a| -a)
 }
 
-pub fn exp(t: &mut Tensor) {
+pub fn inplace_exp(t: &mut Tensor) {
     t.mapv_inplace(|x| x.exp());
 }
 
-pub fn ln(t: &mut Tensor) {
+pub fn inplace_ln(t: &mut Tensor) {
     t.mapv_inplace(|x| x.ln());
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn test_sum() {
-        let a = Tensor::from_elem([3, 10, 1], 3.0);
-        assert_eq!(a.sum(), 90.0_f32);
-    }
-
-    #[test]
-    fn test_max_axis() {
-        let a = Tensor::from_elem([3, 2, 5], 10.0);
-        let b = Tensor::from_elem([3, 2, 5], 3.0);
-
-        // (3, 4, 5)
-        let c = Tensor::cat(&[a, b], 1).unwrap();
-
-        assert_eq!(c.max_axis(1, true), Tensor::from_elem([3, 1, 5], 10.0));
-    }
-
-    #[test]
-    fn test_sum_axis() {
-        let a = Tensor::randn([3, 5, 7]);
-
-        assert_eq!(a.sum_axis(1, false).shape(), [3, 7].to_shape());
-        assert_eq!(a.sum_axis(-1, false), a.fold_axis(-1, 0.0, |&a, &b| a + b));
-    }
-
-    #[test]
-    fn test_argmax() {
-        let a = Tensor::from_slice(
-            [3, 5],
-            &[
-                0.37894, -1.43962, -0.03472, 1.50011, 1.10574, 1.20776, -0.74392, -0.10786,
-                0.48039, -0.82024, -0.62761, -0.94768, 0.75950, 1.23026, 1.93393,
-            ],
-        );
-
-        let b = Tensor::from_slice([5], &[1., 1., 2., 0., 2.]);
-
-        assert!(a.argmax(0).equals(&b, 0.001));
-    }
 
     #[test]
     fn test_softmax() {

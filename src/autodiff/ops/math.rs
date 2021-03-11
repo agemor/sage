@@ -3,15 +3,18 @@ use crate::autodiff::ops::Operator;
 use crate::autodiff::var::Var;
 use crate::tensor::Tensor;
 
-struct Reciprocal;
+struct Recip;
 
 struct Sqrt;
 
-struct Pow;
+struct Pow {
+    n: f32,
+}
 
-impl Operator<1> for Reciprocal {
+impl Operator<1> for Recip {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
+        let x = x[0];
+        x.recip()
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -20,13 +23,16 @@ impl Operator<1> for Reciprocal {
     }
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        unimplemented!()
+        let x = x[0];
+        let gx = gy * x.pow(-2).scalar_mul(-2.0);
+        [gx]
     }
 }
 
 impl Operator<1> for Sqrt {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
+        let x = x[0];
+        x.sqrt()
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -36,14 +42,15 @@ impl Operator<1> for Sqrt {
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x = x[0];
-        let gx = gy / scalar_mul(x.sqrt(), 2.0);
+        let gx = gy / x.sqrt().scalar_mul(2.0);
         [gx]
     }
 }
 
 impl Operator<1> for Pow {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
-        unimplemented!()
+        let x = x[0];
+        x.pow(self.n)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -52,20 +59,22 @@ impl Operator<1> for Pow {
     }
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        unimplemented!()
+        let x = x[0];
+        let gx = gy * x.pow(self.n - 1).scalar_mul(self.n - 1);
+        [gx]
     }
 }
 
 impl Var {
     pub fn reciprocal(&self) -> Var {
-        Reciprocal.forward([self])
+        Recip.forward([self])
     }
 
     pub fn sqrt(&self) -> Var {
         Sqrt.forward([self])
     }
 
-    pub fn pow(&self) -> Var {
-        Pow.forward([self])
+    pub fn pow(&self, n: f32) -> Var {
+        Pow { n }.forward([self])
     }
 }

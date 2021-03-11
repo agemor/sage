@@ -95,7 +95,7 @@ impl Parameter for Dropout {}
 
 impl Stackable for Dropout {
     fn forward(&self, x: &Var) -> Var {
-        unimplemented!()
+        x.clone()
     }
 }
 
@@ -113,6 +113,6 @@ impl Parameter for Softmax {}
 
 impl Stackable for Softmax {
     fn forward(&self, x: &Var) -> Var {
-        unimplemented!()
+        x.softmax(self.axis)
     }
 }

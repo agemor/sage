@@ -1,3 +1,4 @@
+use num_traits::PrimInt;
 use std::fmt::Formatter;
 use std::ops::{Index, IndexMut};
 use std::{fmt, slice};
@@ -255,39 +256,102 @@ impl Iterator for Iter {
 }
 
 pub trait ToShape {
-    fn to_shape(&self) -> Shape;
+    // size = 0 to allow any sizes
+    fn to_shape(&self, size: usize) -> Shape;
 }
 
 impl ToShape for Shape {
-    fn to_shape(&self) -> Shape {
+    fn to_shape(&self, size: usize) -> Shape {
+        if size != 0 && self.size() != size {
+            panic!("size not compatible");
+        }
         *self
     }
 }
 
 impl ToShape for &Shape {
-    fn to_shape(&self) -> Shape {
+    fn to_shape(&self, size: usize) -> Shape {
+        if size != 0 && self.size() != size {
+            panic!("size not compatible");
+        }
         **self
     }
 }
 
+fn size_checked_shape(sizes: &[usize], size: usize) -> Shape {
+    if size == 0 || size == sizes.iter().product() {
+        Shape::new(sizes)
+    } else {
+        panic!("size not compatible");
+    }
+}
+
+fn size_guessed_shape(sizes: &[isize], size: usize) -> Shape {
+    let mut use_guess_idx: bool = false;
+    let mut prod = 1;
+    for s in sizes {
+        if *s <= 0 {
+            if *s == -1 && !use_guess_idx {
+                use_guess_idx = true;
+            } else {
+                panic!("invalid shape format, 0 is used, or -1 is used more than once");
+            }
+        } else {
+            prod *= *s as usize;
+        }
+    }
+
+    if !use_guess_idx && size != 0 && prod != size {
+        panic!("size not compatible");
+    }
+
+    Shape::new(
+        &sizes
+            .iter()
+            .map(|s| if s == -1 { size / prod } else { *s as usize })
+            .collect::<Vec<usize>>(),
+    )
+}
+
 // array literal
 impl<const C: usize> ToShape for [usize; C] {
-    fn to_shape(&self) -> Shape {
-        Shape::new(self)
+    fn to_shape(&self, size: usize) -> Shape {
+        size_checked_shape(self, size)
     }
 }
 
 // slice
 impl<'a> ToShape for &'a [usize] {
-    fn to_shape(&self) -> Shape {
-        Shape::new(self)
+    fn to_shape(&self, size: usize) -> Shape {
+        size_checked_shape(self, size)
     }
 }
 
 // vec
 impl ToShape for Vec<usize> {
-    fn to_shape(&self) -> Shape {
-        Shape::new(self)
+    fn to_shape(&self, size: usize) -> Shape {
+        size_checked_shape(self, size)
+    }
+}
+
+// array literal
+impl<const C: usize> ToShape for [isize; C] {
+    fn to_shape(&self, size: usize) -> Shape {
+        size_guessed_shape(self, size)
+    }
+}
+
+// slice
+impl<'a> ToShape for &'a [isize] {
+    fn to_shape(&self, size: usize) -> Shape {
+        size_guessed_shape(self, size)
+    }
+}
+
+// vec
+impl ToShape for Vec<isize> {
+    fn to_shape(&self, size: usize) -> Shape {
+        size_guessed_shape(self, size)
     }
 }
 
@@ -350,14 +414,47 @@ impl ToIndex for isize {
     }
 }
 
-impl ToIndex for i32 {
-    fn to_index(&self, bound: usize) -> usize {
-        assert_index_bounds(*self as isize, bound);
-        if *self >= 0 {
-            *self as usize
-        } else {
-            (*self + bound as i32) as usize
-        }
+pub trait ToIndices {
+    fn to_indices(&self, bound: usize) -> Vec<usize>;
+}
+
+impl<const C: usize> ToIndices for [usize; C] {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
+    }
+}
+
+// slice
+impl<'a> ToIndices for &'a [usize] {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
+    }
+}
+
+// vec
+impl ToIndices for Vec<usize> {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
+    }
+}
+
+impl<const C: usize> ToIndices for [isize; C] {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
+    }
+}
+
+// slice
+impl<'a> ToIndices for &'a [isize] {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
+    }
+}
+
+// vec
+impl ToIndices for Vec<isize> {
+    fn to_indices(&self, bound: usize) -> Vec<usize> {
+        self.iter().map(|i| i.to_index(bound)).collect()
     }
 }
 

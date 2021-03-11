@@ -32,6 +32,14 @@ impl Operator<1> for Softmax {
 }
 
 impl Var {
+    pub fn mean<I>(&self, axis: I, retain_axis: bool) -> Var
+    where
+        I: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+        self.sum(axis, retain_axis) / self.shape()[axis]
+    }
+
     pub fn softmax<I>(&self, axis: I) -> Var
     where
         I: ToIndex,

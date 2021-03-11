@@ -53,7 +53,9 @@ impl Tensor {
                 .map(|(a, b)| a.matmul(&b))
                 .collect::<Vec<Tensor>>();
 
-            Tensor::stack(&c, 0).unwrap()
+            let c_ref = c.iter().map(|a| a).collect::<Vec<&Tensor>>();
+
+            Tensor::stack(&c_ref, 0).unwrap()
         }
     }
 
@@ -63,6 +65,10 @@ impl Tensor {
         // (A, B) * (B, 1) = (A, 1)
         let v = v.expand_dims(-1);
         self.matmul(&v).squeeze(-1)
+    }
+
+    pub fn tensordot(&self) -> Tensor {
+        Tensor::null()
     }
 }
 
@@ -103,4 +109,9 @@ fn gemm(a: &Tensor, b: &Tensor) -> Tensor {
         );
     }
     Tensor::from_vec([m, n], v)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
 }

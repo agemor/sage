@@ -84,7 +84,7 @@ impl MultiHeadAttention {
         let batch_size = features.shape().sizes()[0];
         let input_len = features.shape().sizes()[1];
 
-        features.reshape([batch_size, input_len, self.num_heads * self.head_dim])
+        features.reshape([batch_size, input_len, -1])
     }
 
     fn extend_mask(&self, mask: &Var) -> Var {

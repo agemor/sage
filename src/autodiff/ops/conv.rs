@@ -1,0 +1,241 @@
+use crate::autodiff::ops::Operator;
+use crate::autodiff::var::Var;
+use crate::tensor::shape::Shape;
+use crate::tensor::Tensor;
+
+// pub struct Conv2d {
+//     stride: usize,
+//     padding: usize,
+//     dilation: usize,
+// }
+
+pub struct Im2Col {
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+    dilation: usize,
+}
+
+pub struct Col2Im {
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+    dilation: usize,
+}
+
+fn get_conv_size(
+    input_size: usize,
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+    dilation: usize,
+) -> usize {
+    (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
+}
+
+fn get_deconv_size(
+    input_size: usize,
+    kernel_size: usize,
+    stride: usize,
+    padding: usize,
+    dilation: usize,
+) -> usize {
+    (input_size - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + 1
+}
+
+// impl Operator<2> for Conv2d {
+//     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
+//         let img = x[0];
+//         let kernel = x[1];
+//
+//         unimplemented!()
+//     }
+//
+//     fn forward(self, x: [&Var; 2]) -> Var {
+//         // (N, C, H, W)
+//         let img = x[0];
+//
+//         // (C_out, C_in, H, W)
+//         let kernel = x[1];
+//
+//         if img.rank() != 4 || kernel.rank() != 4 {
+//             panic!("invalid img or kernel rank");
+//         }
+//
+//         let batch_size = img.shape()[0];
+//         let img_c = img.shape()[1];
+//         let img_h = img.shape()[2];
+//         let img_w = img.shape()[3];
+//
+//         let kernel_c_out = kernel.shape()[0];
+//         let kernel_c_in = kernel.shape()[1];
+//         let kernel_h = kernel.shape()[2];
+//         let kernel_w = kernel.shape()[3];
+//
+//         if img_c != kernel_c_in {
+//             panic!("img and kernel not compatible");
+//         }
+//
+//         let img_h_out = get_conv_size(img_h, kernel_h, self.stride, self.padding, self.dilation);
+//         let img_w_out = get_conv_size(img_w, kernel_w, self.stride, self.padding, self.dilation);
+//
+//         let shape = [batch_size, kernel_c_out, img_h_out, img_w_out];
+//
+//         Var::from_binary_op(shape, self, [img, kernel])
+//     }
+//
+//     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
+//         // x, W, b = self.inputs
+//         // # ==== gx ====
+//         //     gx = deconv2d(gy, W, b=None, stride=self.stride, pad=self.pad,
+//         //                   outsize=(x.shape[2], x.shape[3]))
+//         // # ==== gW ====
+//         //     gW = Conv2DGradW(self)(x, gy)
+//         // # ==== gb ====
+//         //     gb = None
+//         // if b.data is not None:
+//         //     gb = gy.sum(axis=(0, 2, 3))
+//         // return gx, gW, gb
+//
+//         let img = x[0];
+//         let kernel = x[1];
+//
+//         let gimg = deconv2d(gy, kernel, self.stride, self.padding, self.dilation);
+//
+//         //let gkernel
+//         unimplemented!()
+//     }
+// }
+
+impl Operator<1> for Im2Col {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        // (N, C, H, W)
+        let img = x[0];
+
+        if img.rank() != 4 {
+            panic!("only tensors with rank=4 is supported");
+        }
+
+        let batch_size = img.shape()[0];
+        let channels = img.shape()[1];
+        let img_h = img.shape()[2];
+        let img_w = img.shape()[3];
+
+        // (N, C, KH, KW, OH, OW)
+
+        let col_h = get_conv_size(
+            img_h,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+        );
+        let col_w = get_conv_size(
+            img_w,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+        );
+
+        let shape = [
+            batch_size,
+            channels,
+            self.kernel_size,
+            self.kernel_size,
+            col_h,
+            col_w,
+        ];
+
+        Var::from_unary_op(shape, self, img)
+    }
+
+    fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let gx = gy.col2im(self.kernel_size, self.stride, self.padding, self.dilation);
+        [gx]
+    }
+}
+
+impl Operator<1> for Col2Im {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        // (N, C, KH, KW, OH, OW)
+        let img = x[0];
+
+        if img.rank() != 4 {
+            panic!("only tensors with rank=4 is supported");
+        }
+
+        let batch_size = img.shape()[0];
+        let channels = img.shape()[1];
+        let col_h = img.shape()[4];
+        let col_w = img.shape()[5];
+
+        // (N, C, H, W)
+
+        let img_h = get_deconv_size(
+            col_h,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+        );
+        let img_w = get_deconv_size(
+            col_w,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+        );
+
+        let shape = [batch_size, channels, img_h, img_w];
+
+        Var::from_unary_op(shape, self, img)
+    }
+
+    fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let gx = gy.im2col(self.kernel_size, self.stride, self.padding, self.dilation);
+        [gx]
+    }
+}
+
+impl Var {
+    pub fn im2col(
+        &self,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+        dilation: usize,
+    ) -> Var {
+        Im2Col {
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+        }
+        .forward([self])
+    }
+
+    pub fn col2im(
+        &self,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+        dilation: usize,
+    ) -> Var {
+        Col2Im {
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+        }
+        .forward([self])
+    }
+}

@@ -1,5 +1,7 @@
-use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToShape};
+use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
+use itertools::Itertools;
+use num_traits::FromPrimitive;
 
 impl Tensor {
     // * Creates new tensor
@@ -25,7 +27,7 @@ impl Tensor {
     }
 
     // * Creates new tensor
-    pub fn stack<I>(tensors: &[Tensor], axis: I) -> Result<Tensor, ShapeError>
+    pub fn stack<I>(tensors: &[&Tensor], axis: I) -> Result<Tensor, ShapeError>
     where
         I: ToIndex,
     {
@@ -92,15 +94,11 @@ impl Tensor {
     where
         S: ToShape,
     {
-        let new_shape = shape.to_shape();
+        let new_shape = shape.to_shape(self.size());
         let new_strides = Shape::default_strides(new_shape);
 
         if self.is_contiguous() {
-            if self.size() == new_shape.size() {
-                Ok(Tensor::view(self, new_shape, &new_strides, self.offset))
-            } else {
-                Err(ShapeError::new("shape not compatible"))
-            }
+            Ok(Tensor::view(self, new_shape, &new_strides, self.offset))
         } else {
             Err(ShapeError::new("tensor not contiguous"))
         }
@@ -128,14 +126,11 @@ impl Tensor {
         Tensor::view(self, new_shape, &new_strides, self.offset)
     }
 
-    pub fn permute<I>(&self, axes: &[I]) -> Tensor
+    pub fn permute<Is>(&self, axes: Is) -> Tensor
     where
-        I: ToIndex,
+        Is: ToIndices,
     {
-        let axes = axes
-            .iter()
-            .map(|axis| axis.to_index(self.rank()))
-            .collect::<Vec<usize>>();
+        let axes = axes.to_indices(self.rank());
 
         let mut use_counts = vec![0; self.rank()];
 
@@ -162,7 +157,7 @@ impl Tensor {
     where
         S: ToShape,
     {
-        let target_shape = shape.to_shape();
+        let target_shape = shape.to_shape(0);
 
         if self.rank() > target_shape.len() {
             return Err(ShapeError::new("invalid broadcast.. too small shape"));
@@ -313,5 +308,50 @@ impl Tensor {
         J: ToIndex,
     {
         self.slice_axis(start_index, end_index, 0)
+    }
+
+    pub fn sum(&self) -> f32 {
+        self.logical_iter().sum()
+    }
+
+    pub fn sum_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
+    where
+        I: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        let mut new_shape = self.shape;
+        new_shape.remove(axis);
+
+        let mut summed = Tensor::zeros(new_shape);
+
+        for t in self.along_axis(axis) {
+            summed = summed + t;
+        }
+
+        if retain_axis {
+            summed.expand_dims(axis)
+        } else {
+            summed
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_sum() {
+        let a = Tensor::from_elem([3, 10, 1], 3.0);
+        assert_eq!(a.sum(), 90.0_f32);
+    }
+
+    #[test]
+    fn test_sum_axis() {
+        let a = Tensor::randn([3, 5, 7]);
+
+        assert_eq!(a.sum_axis(1, false).shape(), [3, 7].to_shape(0));
+        assert_eq!(a.sum_axis(-1, false), a.fold_axis(-1, 0.0, |&a, &b| a + b));
     }
 }

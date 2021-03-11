@@ -7,7 +7,7 @@ pub fn kaiming_uniform<S>(shape: S, gain: f32) -> Tensor
 where
     S: ToShape,
 {
-    let shape = shape.to_shape();
+    let shape = shape.to_shape(0);
 
     let (fan_in, _) = fan_in_and_out(&shape);
     let std = gain * (1.0 / fan_in as f32).sqrt();
@@ -20,7 +20,7 @@ pub fn kaiming_normal<S>(shape: S, gain: f32) -> Tensor
 where
     S: ToShape,
 {
-    let shape = shape.to_shape();
+    let shape = shape.to_shape(0);
 
     let (fan_in, _) = fan_in_and_out(&shape);
     let std = gain * (1.0 / fan_in as f32).sqrt();
@@ -32,7 +32,7 @@ fn fan_in_and_out<S>(shape: S) -> (usize, usize)
 where
     S: ToShape,
 {
-    let shape = shape.to_shape();
+    let shape = shape.to_shape(0);
 
     if shape.len() < 2 {
         panic!("cannot compute.. shape too small");
