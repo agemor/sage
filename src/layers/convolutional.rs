@@ -28,8 +28,10 @@ impl Conv2d {
 
 impl Parameter for Conv2d {
     fn init(&self) {
-        self.filter
-            .set_data(tensor::init::kaiming_uniform(self.kernel.shape(), 1.0));
+        self.filter.set_data(Tensor::null());
+
+        //self.filter
+        //    .set_data(tensor::init::kaiming_uniform(self.filter.shape(), 1.0));
         self.bias.set_data(Tensor::zeros(self.bias.shape()));
     }
     fn params(&self) -> Option<Vec<&Var>> {
@@ -49,12 +51,12 @@ impl Stackable for Conv2d {
         // (N*OH*OW, C*KH*KW)
         let col = col
             .permute([0, 4, 5, 1, 2, 3])
-            .reshape([batch_size * col_h * col_w, -1]);
+            .reshape([batch_size * col_h * col_w, 0]);
 
         let out = col.matmul(&self.filter) + &self.bias;
 
         let y = out
-            .reshape([batch_size, col_h, col_w, -1])
+            .reshape([batch_size, col_h, col_w, 0])
             .permute([0, 3, 1, 2]);
 
         y

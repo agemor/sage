@@ -1,5 +1,5 @@
 use crate::autodiff::var::RuntimeProfile;
-use crate::autodiff::{RuntimeProfile, Var};
+use crate::autodiff::Var;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -48,13 +48,13 @@ impl Session {
                 // ready to evaluate!
                 if unevaluated.is_empty() {
                     // exceeds mem budget?
-                    if op.mem_req() > self.mem_budget {
-                        // Let's start with something basic.
-                        //self.collect_garbage();
+                    //if op.mem_req() > self.mem_budget {
+                    // Let's start with something basic.
+                    //self.collect_garbage();
 
-                        // ... and move on to the more sophisticated one, only when required.
-                        // self.greedy_drop(&in_vars, parent.op.mem_req());
-                    }
+                    // ... and move on to the more sophisticated one, only when required.
+                    // self.greedy_drop(&in_vars, parent.op.mem_req());
+                    //}
 
                     // do some runtime profiling
                     let timer = Instant::now();

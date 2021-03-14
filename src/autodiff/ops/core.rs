@@ -2,7 +2,7 @@ use crate::autodiff::ops::Operator;
 use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::shape::{Shape, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
-use std::cmp;
+use std::{cmp, ops};
 
 // basic arithmetics
 struct Add;
@@ -51,7 +51,7 @@ struct Reshape {
 }
 
 struct Permute {
-    target: Vec<usize>,
+    axes: Vec<usize>,
 }
 
 struct SelectIndex {
@@ -183,6 +183,10 @@ impl Operator<2> for Mul {
         Var::from_binary_op(shape, self, [x0, x1])
     }
 
+    fn is_fdb(&self) -> bool {
+        true
+    }
+
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
         let x0 = x[0];
         let x1 = x[1];
@@ -207,6 +211,10 @@ impl Operator<2> for Div {
 
         let shape = Shape::union(x0.shape(), x1.shape()).unwrap();
         Var::from_binary_op(shape, self, [x0, x1])
+    }
+
+    fn is_fdb(&self) -> bool {
+        true
     }
 
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
@@ -310,7 +318,12 @@ impl Operator<1> for Sum {
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x = x[0];
-        let gx = gy.broadcast_to(x.shape());
+
+        let gx = if self.retain_axis {
+            gy.broadcast_to(x.shape())
+        } else {
+            gy.unsqueeze(self.axis).broadcast_to(x.shape())
+        };
 
         [gx]
     }
@@ -392,7 +405,7 @@ impl Operator<1> for Reshape {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
 
-        x.reshape(self.to)
+        x.reshape(self.to).unwrap()
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -403,7 +416,7 @@ impl Operator<1> for Reshape {
             panic!("incompatible size");
         }
 
-        Var::from_unary_op(self.to.size(), self, x)
+        Var::from_unary_op(self.to, self, x)
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
@@ -417,26 +430,27 @@ impl Operator<1> for Permute {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
 
-        x.permute(&self.target)
+        x.permute(self.axes.as_slice())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
-        //TODO: add axes check
-        Var::from_unary_op(self.target.size(), self, x)
+        let mut shape = x.shape();
+        shape.permute(self.axes.as_slice());
+        Var::from_unary_op(shape, self, x)
     }
 
     fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
         // simple argsort
-        let reverse = (0..self.target.len())
+        let reverse = (0..self.axes.len())
             .into_iter()
             .map(|i| {
                 // must unwrap
-                self.target.iter().position(|axis| axis == i).unwrap()
+                self.axes.iter().position(|&axis| axis == i).unwrap()
             })
             .collect::<Vec<usize>>();
 
-        let gx = gy.permute(&reverse);
+        let gx = gy.permute(reverse.as_slice());
         [gx]
     }
 }
@@ -459,7 +473,7 @@ impl Operator<1> for SelectIndex {
     }
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let x: &Var = x[0];
+        let x = x[0];
         let orig_size = x.shape()[self.axis];
         let gx = gy.unselect_index(self.index, orig_size, self.axis);
         [gx]
@@ -743,7 +757,7 @@ impl Var {
     {
         Reshape {
             from: self.shape(),
-            to: shape.to_shape(self.size()),
+            to: shape.to_shape(self.shape().size()),
         }
         .forward([self])
     }
@@ -753,7 +767,7 @@ impl Var {
         Is: ToIndices,
     {
         Permute {
-            target: axes.to_indices(self.rank()),
+            axes: axes.to_indices(self.rank()),
         }
         .forward([self])
     }
@@ -802,7 +816,7 @@ impl Var {
         let axis = axis.to_index(self.rank());
 
         UnselectIndex {
-            index: index.to_index(self.shape()[axis]),
+            index: index.to_index(size),
             size,
             axis,
         }

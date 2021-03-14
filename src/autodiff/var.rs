@@ -177,6 +177,11 @@ impl Var {
         node.data.is_some()
     }
 
+    pub fn is_leaf(&self) -> bool {
+        let node = self.node();
+        node.origin.is_none()
+    }
+
     fn data_unchecked(&self) -> Ref<Tensor> {
         let node = self.node();
         Ref::map(node, |x| match x.data {
@@ -233,6 +238,18 @@ impl ToVar for &Var {
     }
 }
 
+impl ToVar for Tensor {
+    fn to_var(&self) -> Var {
+        Var::with_data(self.clone())
+    }
+}
+
+impl ToVar for &Tensor {
+    fn to_var(&self) -> Var {
+        Var::with_data((*self).clone())
+    }
+}
+
 impl ToVar for f32 {
     fn to_var(&self) -> Var {
         Var::with_data(Tensor::scalar(*self))
@@ -279,7 +296,7 @@ pub struct RuntimeProfile {
     pub call_time: Duration,
 }
 
-struct WeakVar {
+pub struct WeakVar {
     node: Weak<RefCell<VarNode>>,
 }
 
@@ -290,7 +307,7 @@ impl WeakVar {
         }
     }
 
-    fn to_var(&self) -> Option<Var> {
+    pub(crate) fn to_var(&self) -> Option<Var> {
         self.node.upgrade().map(|x| Var::from_node(x))
     }
 }

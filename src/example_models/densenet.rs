@@ -41,7 +41,7 @@ impl DenseNetConfig {
 
 pub struct DenseNet {
     model: Sequential,
-    classifier: Affine,
+    classifier: Dense,
 }
 
 impl DenseNet {
@@ -88,7 +88,13 @@ impl DenseNet {
         Sequential::from(
             (0..num_layers)
                 .into_iter()
-                .map(|i| box BottleneckLayer::new(in_planes * i * growth_rate, growth_rate, config))
+                .map(|i| {
+                    box BottleneckLayer::new(
+                        in_planes * i * config.growth_rate,
+                        config.growth_rate,
+                        config,
+                    ) as Box<dyn Stackable>
+                })
                 .collect(),
         )
     }
@@ -131,13 +137,6 @@ impl BottleneckLayer {
             ]),
         }
     }
-
-    fn forward(&self, x: &Var) -> Var {
-        let y = self.pass.forward(x);
-
-        // key idea of the DenseNet
-        x.concat(y, 1)
-    }
 }
 
 impl Parameter for BottleneckLayer {
@@ -147,5 +146,14 @@ impl Parameter for BottleneckLayer {
 
     fn params(&self) -> Option<Vec<&Var>> {
         self.pass.params()
+    }
+}
+
+impl Stackable for BottleneckLayer {
+    fn forward(&self, x: &Var) -> Var {
+        let y = self.pass.forward(x);
+
+        // key idea of the DenseNet
+        x.concat(y, 1)
     }
 }

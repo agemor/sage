@@ -47,7 +47,7 @@ impl MultiHeadAttention {
 
         // Calculate the attention scores
         // (N, num_heads, L, head_dim) * (N, num_head, head_dim, L) -> (N, num_head, L, L)
-        let attention = query.matmul(key.transpose(-1, -2)) / self.head_dim.sqrt();
+        let attention = query.matmul(key.transpose(-1, -2)) / (self.head_dim as f32).sqrt();
 
         // Apply softmax to the attention scores
         let attention = self
@@ -84,7 +84,7 @@ impl MultiHeadAttention {
         let batch_size = features.shape().sizes()[0];
         let input_len = features.shape().sizes()[1];
 
-        features.reshape([batch_size, input_len, -1])
+        features.reshape([batch_size, input_len, 0])
     }
 
     fn extend_mask(&self, mask: &Var) -> Var {

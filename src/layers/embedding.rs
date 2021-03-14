@@ -19,15 +19,15 @@ impl Embedding {
         }
     }
 
-    pub fn forward(&self, batch_ids: Vec<Vec<usize>>) -> Var {
+    pub fn forward(&self, batch_ids: &[Vec<usize>]) -> Var {
         batch_ids
             .iter()
             .map(|ids| {
                 // (W, F)
                 ids.iter()
-                    .map(|id| {
+                    .map(|&id| {
                         // (1, F)
-                        self.weights.index(id, 0).unsqueeze(0)
+                        self.weights.index(id, 0)
                     })
                     .fold1(|acc, feature| acc.concat(feature, 0))
                     .unwrap()
@@ -42,7 +42,8 @@ impl Embedding {
 
 impl Parameter for Embedding {
     fn init(&self) {
-        self.weights.set_data(Tensor::randn(self.kernel.shape()));
+        self.weights.set_data(Tensor::null());
+        //self.weights.set_data(Tensor::zeros(self.weights.shape()));
     }
 
     fn params(&self) -> Option<Vec<&Var>> {

@@ -56,11 +56,12 @@ impl Bert {
         }
     }
 
-    pub fn forward(&self, token_ids: &[usize], attn_mask: &Var) -> Var {
+    pub fn forward(&self, token_ids: &[Vec<usize>], attn_mask: &Var) -> Var {
         let embeddings = self.embedding.forward(token_ids);
         let features = self.encoder.forward(embeddings, attn_mask);
 
-        let cls_tokens = features.index(1, 1);
+        let cls_tokens = features.index(1, 1).squeeze(1);
+
         let logits = self.classifier.forward(&cls_tokens);
 
         logits
@@ -102,15 +103,13 @@ impl BertEmbedding {
         }
     }
 
-    pub fn forward(&self, token_ids: &[usize]) -> Var {
+    pub fn forward(&self, token_ids: &[Vec<usize>]) -> Var {
         // support 2d token ids
-        unimplemented!();
-
-        let pos_ids = (0..token_ids.len()).collect::<Vec<usize>>();
-        let type_ids = vec![0; token_ids.len()];
+        let pos_ids = (0..token_ids[0].len()).collect::<Vec<usize>>();
+        let type_ids = vec![0; token_ids[0].len()];
         let word_embeddings = self.word_emb.forward(token_ids);
-        let pos_embeddings = self.pos_emb.forward(&pos_ids);
-        let type_embeddings = self.word_emb.forward(&type_ids);
+        let pos_embeddings = self.pos_emb.forward(&[pos_ids]);
+        let type_embeddings = self.word_emb.forward(&[type_ids]);
 
         self.norm
             .forward(&(word_embeddings + pos_embeddings + type_embeddings))
@@ -120,6 +119,7 @@ impl BertEmbedding {
 impl Parameter for BertEmbedding {
     fn init(&self) {
         self.word_emb.init();
+
         self.pos_emb.init();
         self.type_emb.init();
         self.norm.init();
@@ -178,7 +178,7 @@ impl BertLayer {
             attention: MultiHeadAttention::new(
                 config.embed_dim,
                 config.num_attention_heads,
-                config.attention_dropout_prob,
+                config.dropout_prob,
                 config.layer_norm_eps,
             ),
             ffn: Sequential::from(vec![

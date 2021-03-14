@@ -20,12 +20,16 @@ impl Operator<1> for Softmax {
         Var::from_unary_op(x.shape(), self, x)
     }
 
+    fn is_fdb(&self) -> bool {
+        true
+    }
+
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x = x[0];
         let y = x.softmax(self.axis);
 
-        let mut gx = y * gy;
-        gx = gx - y * gx.sum(self.axis, true);
+        let mut gx = &y * gy;
+        gx = &gx - y * gx.sum(self.axis, true);
 
         [gx]
     }
@@ -37,9 +41,19 @@ impl Var {
         I: ToIndex,
     {
         let axis = axis.to_index(self.rank());
-        self.sum(axis, retain_axis) / self.shape()[axis]
+        self.sum(axis, retain_axis) / self.shape()[axis] as f32
     }
 
+    pub fn var<I>(&self, axis: I, retain_axis: bool) -> Var
+    where
+        I: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+        (self - self.mean(axis, true))
+            .pow(2.0)
+            .sum(axis, retain_axis)
+            / (self.shape()[axis] - 1) as f32
+    }
     pub fn softmax<I>(&self, axis: I) -> Var
     where
         I: ToIndex,

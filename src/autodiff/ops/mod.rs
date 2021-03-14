@@ -6,16 +6,21 @@ pub mod loss;
 pub mod math;
 pub mod stats;
 
+use crate::autodiff::var::WeakVar;
 use crate::autodiff::Var;
 use crate::tensor::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
 use std::ops::Deref;
-use std::{cmp, ops};
 
 pub trait Operator<const N: usize> {
     fn compute(&self, x: [&Tensor; N]) -> Tensor;
 
     fn forward(self, x: [&Var; N]) -> Var;
+
+    // forward-dependent backward pass. Mostly no
+    fn is_fdb(&self) -> bool {
+        false
+    }
 
     // f(x) = u
     // f'(x) -> ∂u/∂x
@@ -55,10 +60,6 @@ impl<const N: usize> Operation<{ N }> {
         let data = self.input.each_ref().map(|v| v.data());
         let data_borrowed = data.each_ref().map(|t| t.deref());
         self.operator.compute(data_borrowed)
-    }
-
-    pub fn mem_req(&self) -> usize {
-        self.operator.mem_req()
     }
 
     pub fn input(&self) -> [Var; N] {
@@ -103,26 +104,18 @@ impl OperationEnum {
         }
     }
 
-    // returns time and memory consumption
-    pub fn complexity(&self) -> Complexity {
-        match self {
-            Self::Unary(o) => o.complexity(),
-            Self::Binary(o) => o.complexity(),
-        }
-    }
-
-    pub fn mem_req(&self) -> usize {
-        match self {
-            Self::Unary(o) => o.mem_req(),
-            Self::Binary(o) => o.mem_req(),
-        }
-    }
-
     pub fn input(&self) -> Vec<Var> {
         // TODO: change it to smallvec for better performance
         match self {
             Self::Unary(o) => o.input.to_vec(),
             Self::Binary(o) => o.input.to_vec(),
+        }
+    }
+
+    pub fn is_fdb(&self) -> bool {
+        match self {
+            Self::Unary(o) => o.operator.is_fdb(),
+            Self::Binary(o) => o.operator.is_fdb(),
         }
     }
 

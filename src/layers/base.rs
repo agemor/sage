@@ -65,8 +65,10 @@ impl Dense {
 impl Parameter for Dense {
     fn init(&self) {
         // do some Kaiming init (targeted for the ReLU)
-        self.kernel
-            .set_data(tensor::init::kaiming_uniform(self.kernel.shape(), 1.0));
+        //self.kernel
+        //    .set_data(tensor::init::kaiming_uniform(self.kernel.shape(), 1.0));
+
+        self.kernel.set_data(Tensor::null());
 
         self.bias.set_data(Tensor::zeros(self.bias.shape()));
     }

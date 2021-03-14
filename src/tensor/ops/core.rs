@@ -2,6 +2,7 @@ use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
 use itertools::Itertools;
 use num_traits::FromPrimitive;
+use std::ops;
 
 impl Tensor {
     // * Creates new tensor
@@ -336,6 +337,57 @@ impl Tensor {
         }
     }
 }
+
+// math utility methods
+pub fn add(a: &Tensor, b: &Tensor) -> Tensor {
+    a.zip_map(b, |&a, &b| a + b).unwrap()
+}
+
+pub fn sub(a: &Tensor, b: &Tensor) -> Tensor {
+    a.zip_map(b, |&a, &b| a - b).unwrap()
+}
+
+pub fn mul(a: &Tensor, b: &Tensor) -> Tensor {
+    a.zip_map(b, |&a, &b| a * b).unwrap()
+}
+
+pub fn div(a: &Tensor, b: &Tensor) -> Tensor {
+    a.zip_map(b, |&a, &b| a / b).unwrap()
+}
+
+pub fn neg(a: &Tensor) -> Tensor {
+    a.map(|&a| -a)
+}
+
+pub fn inplace_exp(t: &mut Tensor) {
+    t.mapv_inplace(|x| x.exp());
+}
+
+pub fn inplace_ln(t: &mut Tensor) {
+    t.mapv_inplace(|x| x.ln());
+}
+
+macro_rules! impl_tensor_op {
+    ($op:tt, $f:expr) => {
+        impl_op!($op |a: Tensor, b: Tensor| -> Tensor {$f(&a, &b) });
+        impl_op!($op |a: &Tensor, b: Tensor| -> Tensor {  $f(a, &b) });
+        impl_op!($op |a: Tensor, b: &Tensor| -> Tensor {  $f(&a, b) });
+        impl_op!($op |a: &Tensor, b: &Tensor| -> Tensor {  $f(a, b) });
+        impl_op!($op |a: Tensor, b: f32| -> Tensor {  $f(&a, &Tensor::scalar(b)) });
+        impl_op!($op |a: &Tensor, b: f32| -> Tensor {  $f(a, &Tensor::scalar(b))});
+        impl_op!($op |a: f32, b: Tensor| -> Tensor {  $f(&Tensor::scalar(a), &b) });
+        impl_op!($op |a: f32, b: &Tensor| -> Tensor {  $f(&Tensor::scalar(a), b)});
+    }
+}
+
+// basic arithmetics
+impl_tensor_op!(+, add);
+impl_tensor_op!(-, sub);
+impl_tensor_op!(*, mul);
+impl_tensor_op!(/, div);
+
+impl_op!(-|a: Tensor| -> Tensor { neg(&a) });
+impl_op!(-|a: &Tensor| -> Tensor { neg(a) });
 
 #[cfg(test)]
 mod test {

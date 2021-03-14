@@ -3,7 +3,7 @@
 use std::cell::UnsafeCell;
 use std::fmt::Formatter;
 use std::rc::Rc;
-use std::{fmt, ops, ptr, slice};
+use std::{fmt, ptr, slice};
 
 use itertools::{zip, Itertools};
 use matrixmultiply;
@@ -17,7 +17,7 @@ use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToShape};
 
 pub mod init;
 pub mod iter;
-mod ops;
+pub mod ops;
 pub mod shape;
 
 /////////////////////////// Tensor implementation ///////////////////////////
@@ -189,7 +189,7 @@ impl Tensor {
         S: ToShape,
     {
         Tensor {
-            shape: shape.to_shape(orig.size()),
+            shape: shape.to_shape(0), // no check
             strides: strides.to_vec(),
             offset,
             arr: orig.arr.clone(), // this increases reference counter (do not copy actual data)
@@ -435,34 +435,6 @@ impl fmt::Debug for Tensor {
             .finish()
     }
 }
-
-// let user know it is dangerous and might cause UD.
-
-// The reason we are not taking moved value is that,
-// i) cannot ensure it's big enough (or too big) to handle new value (due to broadcasting)
-// ii) it will be eventually dropped at the end of the scope (if reference count becomes 0)
-
-macro_rules! impl_tensor_op {
-    ($op:tt, $f:expr) => {
-        impl_op!($op |a: Tensor, b: Tensor| -> Tensor {$f(&a, &b) });
-        impl_op!($op |a: &Tensor, b: Tensor| -> Tensor {  $f(a, &b) });
-        impl_op!($op |a: Tensor, b: &Tensor| -> Tensor {  $f(&a, b) });
-        impl_op!($op |a: &Tensor, b: &Tensor| -> Tensor {  $f(a, b) });
-        impl_op!($op |a: Tensor, b: f32| -> Tensor {  $f(&a, &Tensor::scalar(b)) });
-        impl_op!($op |a: &Tensor, b: f32| -> Tensor {  $f(a, &Tensor::scalar(b))});
-        impl_op!($op |a: f32, b: Tensor| -> Tensor {  $f(&Tensor::scalar(a), &b) });
-        impl_op!($op |a: f32, b: &Tensor| -> Tensor {  $f(&Tensor::scalar(a), b)});
-    }
-}
-
-// basic arithmetics
-impl_tensor_op!(+, math::add);
-impl_tensor_op!(-, math::sub);
-impl_tensor_op!(*, math::mul);
-impl_tensor_op!(/, math::div);
-
-impl_op!(-|a: Tensor| -> Tensor { math::neg(&a) });
-impl_op!(-|a: &Tensor| -> Tensor { math::neg(a) });
 
 #[cfg(test)]
 mod tests {

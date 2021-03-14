@@ -44,7 +44,7 @@ impl Stackable for AvgPool2d {
         // (N*C*OH*OW, KH*KW)
         let col = col
             .permute([0, 1, 4, 5, 2, 3])
-            .reshape([-1, self.kernel_size * self.kernel_size]);
+            .reshape([0, self.kernel_size * self.kernel_size]);
 
         let col_mean = col.mean(1, false);
 

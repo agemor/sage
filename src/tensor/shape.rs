@@ -56,8 +56,8 @@ impl Shape {
         S: ToShape,
         T: ToShape,
     {
-        let shape_a = shape_a.to_shape();
-        let shape_b = shape_b.to_shape();
+        let shape_a = shape_a.to_shape(0);
+        let shape_b = shape_b.to_shape(0);
 
         if shape_a == shape_b {
             Ok(shape_a)
@@ -99,7 +99,7 @@ impl Shape {
         // tensor with (A, B, C) shape
         // have (B*C, C, 1) strides as a default.
 
-        for dim_size in shape.to_shape().iter().skip(1).rev() {
+        for dim_size in shape.to_shape(0).iter().skip(1).rev() {
             cum_prod *= dim_size;
             strides.push(cum_prod);
         }
@@ -204,11 +204,35 @@ impl Shape {
         (Shape::new(sizes_a), Shape::new(sizes_b))
     }
 
+    pub fn permute<Is>(&mut self, axes: Is) -> &mut Self
+    where
+        Is: ToIndices,
+    {
+        let axes = axes.to_indices(self.len());
+
+        let mut use_counts = vec![0; self.len()];
+
+        axes.iter().for_each(|axis| {
+            use_counts[*axis] += 1;
+        });
+
+        if use_counts.iter().any(|count| *count != 1) {
+            panic!("some axes are not used, or used more than once");
+        }
+
+        let shape_copy = self.clone();
+
+        for axis in axes {
+            self.sizes[axis] = shape_copy[axis];
+        }
+        self
+    }
+
     pub fn extend<S>(&mut self, shape: S) -> &mut Self
     where
         S: ToShape,
     {
-        let shape = shape.to_shape();
+        let shape = shape.to_shape(0);
 
         if self.len + shape.len >= MAX_SHAPE_LEN {
             panic!("exceeds maximum shape len")
@@ -263,7 +287,11 @@ pub trait ToShape {
 impl ToShape for Shape {
     fn to_shape(&self, size: usize) -> Shape {
         if size != 0 && self.size() != size {
-            panic!("size not compatible");
+            panic!(
+                "size not compatible, {} expected but {} is given",
+                size,
+                self.size()
+            );
         }
         *self
     }
@@ -278,23 +306,19 @@ impl ToShape for &Shape {
     }
 }
 
-fn size_checked_shape(sizes: &[usize], size: usize) -> Shape {
-    if size == 0 || size == sizes.iter().product() {
-        Shape::new(sizes)
-    } else {
-        panic!("size not compatible");
-    }
-}
-
-fn size_guessed_shape(sizes: &[isize], size: usize) -> Shape {
+fn size_guessed_shape(sizes: &[usize], size: usize) -> Shape {
     let mut use_guess_idx: bool = false;
     let mut prod = 1;
+
     for s in sizes {
-        if *s <= 0 {
-            if *s == -1 && !use_guess_idx {
+        if *s == 0 {
+            if size == 0 {
+                panic!("cannot guess axis size");
+            }
+            if !use_guess_idx {
                 use_guess_idx = true;
             } else {
-                panic!("invalid shape format, 0 is used, or -1 is used more than once");
+                panic!("invalid shape format, 0 is used more than once");
             }
         } else {
             prod *= *s as usize;
@@ -308,7 +332,7 @@ fn size_guessed_shape(sizes: &[isize], size: usize) -> Shape {
     Shape::new(
         &sizes
             .iter()
-            .map(|s| if s == -1 { size / prod } else { *s as usize })
+            .map(|&s| if s == 0 { size / prod } else { s })
             .collect::<Vec<usize>>(),
     )
 }
@@ -316,40 +340,19 @@ fn size_guessed_shape(sizes: &[isize], size: usize) -> Shape {
 // array literal
 impl<const C: usize> ToShape for [usize; C] {
     fn to_shape(&self, size: usize) -> Shape {
-        size_checked_shape(self, size)
+        size_guessed_shape(self, size)
     }
 }
 
 // slice
 impl<'a> ToShape for &'a [usize] {
     fn to_shape(&self, size: usize) -> Shape {
-        size_checked_shape(self, size)
+        size_guessed_shape(self, size)
     }
 }
 
 // vec
 impl ToShape for Vec<usize> {
-    fn to_shape(&self, size: usize) -> Shape {
-        size_checked_shape(self, size)
-    }
-}
-
-// array literal
-impl<const C: usize> ToShape for [isize; C] {
-    fn to_shape(&self, size: usize) -> Shape {
-        size_guessed_shape(self, size)
-    }
-}
-
-// slice
-impl<'a> ToShape for &'a [isize] {
-    fn to_shape(&self, size: usize) -> Shape {
-        size_guessed_shape(self, size)
-    }
-}
-
-// vec
-impl ToShape for Vec<isize> {
     fn to_shape(&self, size: usize) -> Shape {
         size_guessed_shape(self, size)
     }
@@ -414,6 +417,17 @@ impl ToIndex for isize {
     }
 }
 
+impl ToIndex for i32 {
+    fn to_index(&self, bound: usize) -> usize {
+        assert_index_bounds(*self as isize, bound);
+        if *self >= 0 {
+            *self as usize
+        } else {
+            (*self + bound as i32) as usize
+        }
+    }
+}
+
 pub trait ToIndices {
     fn to_indices(&self, bound: usize) -> Vec<usize>;
 }
@@ -438,21 +452,21 @@ impl ToIndices for Vec<usize> {
     }
 }
 
-impl<const C: usize> ToIndices for [isize; C] {
+impl<const C: usize> ToIndices for [i32; C] {
     fn to_indices(&self, bound: usize) -> Vec<usize> {
         self.iter().map(|i| i.to_index(bound)).collect()
     }
 }
 
 // slice
-impl<'a> ToIndices for &'a [isize] {
+impl<'a> ToIndices for &'a [i32] {
     fn to_indices(&self, bound: usize) -> Vec<usize> {
         self.iter().map(|i| i.to_index(bound)).collect()
     }
 }
 
 // vec
-impl ToIndices for Vec<isize> {
+impl ToIndices for Vec<i32> {
     fn to_indices(&self, bound: usize) -> Vec<usize> {
         self.iter().map(|i| i.to_index(bound)).collect()
     }
@@ -477,12 +491,12 @@ mod tests {
 
     #[test]
     fn test_len() {
-        assert_eq!([2, 2, 2, 2, 2].to_shape().len(), 5_usize);
+        assert_eq!([2, 2, 2, 2, 2].to_shape(0).len(), 5_usize);
     }
 
     #[test]
     fn test_size() {
-        assert_eq!([2, 2, 2, 2, 2].to_shape().size(), 2_usize.pow(5));
+        assert_eq!([2, 2, 2, 2, 2].to_shape(0).size(), 2_usize.pow(5));
     }
 
     #[test]
@@ -493,35 +507,35 @@ mod tests {
 
     #[test]
     fn test_insert() {
-        let mut a = [1, 2].to_shape();
-        assert_eq!(*a.insert(0, 1), [1, 1, 2].to_shape());
-        assert_eq!(*a.insert(0, 2), [2, 1, 1, 2].to_shape());
-        assert_eq!(*a.insert(3, 4), [2, 1, 1, 4, 2].to_shape());
-        assert_eq!(*a.insert(5, 5), [2, 1, 1, 4, 2, 5].to_shape());
+        let mut a = [1, 2].to_shape(0);
+        assert_eq!(*a.insert(0, 1), [1, 1, 2].to_shape(0));
+        assert_eq!(*a.insert(0, 2), [2, 1, 1, 2].to_shape(0));
+        assert_eq!(*a.insert(3, 4), [2, 1, 1, 4, 2].to_shape(0));
+        assert_eq!(*a.insert(5, 5), [2, 1, 1, 4, 2, 5].to_shape(0));
     }
 
     #[test]
     fn test_remove() {
-        let mut a = [9, 1, 2, 3, 4, 5].to_shape();
-        assert_eq!(*a.remove(5), [9, 1, 2, 3, 4].to_shape());
-        assert_eq!(*a.remove(0), [1, 2, 3, 4].to_shape());
+        let mut a = [9, 1, 2, 3, 4, 5].to_shape(0);
+        assert_eq!(*a.remove(5), [9, 1, 2, 3, 4].to_shape(0));
+        assert_eq!(*a.remove(0), [1, 2, 3, 4].to_shape(0));
     }
 
     #[test]
     fn test_swap() {
-        let mut a = [1, 2].to_shape();
-        assert_eq!(*a.swap(1, 0), [2, 1].to_shape());
+        let mut a = [1, 2].to_shape(0);
+        assert_eq!(*a.swap(1, 0), [2, 1].to_shape(0));
     }
 
     #[test]
     fn test_replace() {
-        let mut a = [1, 2].to_shape();
-        assert_eq!(*a.replace(1, 1), [1, 1].to_shape());
+        let mut a = [1, 2].to_shape(0);
+        assert_eq!(*a.replace(1, 1), [1, 1].to_shape(0));
     }
 
     #[test]
     fn test_split() {
-        let orig = [9, 1, 2, 3, 4, 5].to_shape();
+        let orig = [9, 1, 2, 3, 4, 5].to_shape(0);
         let (a, b) = orig.split(0);
         assert_eq!(a, Shape::empty());
         assert_eq!(b, orig);
@@ -533,19 +547,19 @@ mod tests {
 
     #[test]
     fn test_extend() {
-        let orig = [9, 1, 2, 3, 4, 5].to_shape();
+        let orig = [9, 1, 2, 3, 4, 5].to_shape(0);
         let (mut a, b) = orig.split(3);
         assert_eq!(*a.extend(b), orig);
     }
 
     #[test]
     fn test_union() {
-        let a = [3, 3, 3, 1, 1, 1, 3, 3, 3].to_shape();
-        let b = [1, 1, 1, 3, 7, 3, 1, 1, 1].to_shape();
+        let a = [3, 3, 3, 1, 1, 1, 3, 3, 3].to_shape(0);
+        let b = [1, 1, 1, 3, 7, 3, 1, 1, 1].to_shape(0);
 
         assert_eq!(
             Shape::union(a, b).unwrap(),
-            [3, 3, 3, 3, 7, 3, 3, 3, 3].to_shape()
+            [3, 3, 3, 3, 7, 3, 3, 3, 3].to_shape(0)
         );
     }
 

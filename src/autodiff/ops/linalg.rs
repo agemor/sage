@@ -46,6 +46,10 @@ impl Operator<2> for Matmul {
         Var::from_binary_op(batch, self, [x0, x1])
     }
 
+    fn is_fdb(&self) -> bool {
+        true
+    }
+
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
         // (*, A, B)
         let x0 = x[0];
@@ -95,6 +99,10 @@ impl Operator<2> for Matvec {
         batch.insert(-1, x0.shape()[x0.rank() - 2]);
 
         Var::from_binary_op(batch, self, [x0, x1])
+    }
+
+    fn is_fdb(&self) -> bool {
+        true
     }
 
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
@@ -229,7 +237,7 @@ mod tests {
         let a = Var::with_data(a_data);
         let b = Var::with_data(b_data);
 
-        let c = matmul(&a, &b);
+        let c = a.matmul(&b);
 
         // forward check
 
@@ -279,7 +287,7 @@ mod tests {
         let a = Var::with_data(a_data);
         let b = Var::with_data(b_data);
 
-        let c = matvec(&a, &b);
+        let c = a.matvec(&b);
 
         // forward check
         assert!(c.data().equals(&c_data, 0.001));

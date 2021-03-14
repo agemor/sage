@@ -12,12 +12,16 @@
 #[macro_use]
 extern crate impl_ops;
 
-use crate::autodiff::diff;
+use crate::autodiff::ops::loss::softmax_cross_entropy;
 use crate::autodiff::var::Var;
+use crate::autodiff::{diff, diff_eval};
+use crate::data::datasets::mnist::Mnist;
+use crate::data::Dataset;
 use crate::layers::activations::Relu;
 use crate::layers::base::{Dense, Sequential};
 use crate::layers::{Parameter, Stackable};
 use crate::optim::{Optimizer, Sgd};
+use crate::paper_experiments::exp1_memory_profile;
 
 mod autodiff;
 mod data;
@@ -28,6 +32,10 @@ mod paper_experiments;
 mod tensor;
 
 fn main() {
+    exp1_memory_profile();
+}
+
+fn mnist_trainng() {
     // Load dataset
     let mnist = Mnist::from_source(
         "./data/train-images.idx3-ubyte",
@@ -56,10 +64,10 @@ fn main() {
         let labels = Var::with_data(labels);
 
         let logits = model.forward(&input);
-        let loss = ops::softmax_cross_entropy(&logits, &labels);
+        let loss = softmax_cross_entropy(&logits, &labels);
 
         let params = model.params().unwrap();
-        let grads = diff(&loss, &params);
+        let grads = diff_eval(&loss, &params);
 
         println!("loss: {}", loss.data().mean());
         println!("accuracy: {}", accuracy(&logits, &labels));
@@ -82,7 +90,7 @@ fn accuracy(logits: &Var, labels: &Var) -> f32 {
     let logits = logits.data().argmax(1);
     let labels = labels.data().argmax(1);
 
-    let mut correct = 0;
+    let mut correct: isize = 0;
 
     logits
         .logical_iter()

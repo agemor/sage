@@ -30,6 +30,10 @@ impl Operator<2> for SoftmaxCrossEntropy {
         Var::from_binary_op(shape, self, [x0, x1])
     }
 
+    fn is_fdb(&self) -> bool {
+        true
+    }
+
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
         let x0 = x[0];
         let t = x[1];

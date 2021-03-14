@@ -62,35 +62,6 @@ impl Tensor {
     }
 }
 
-// math utility methods
-pub fn add(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a + b).unwrap()
-}
-
-pub fn sub(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a - b).unwrap()
-}
-
-pub fn mul(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a * b).unwrap()
-}
-
-pub fn div(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a / b).unwrap()
-}
-
-pub fn neg(a: &Tensor) -> Tensor {
-    a.map(|&a| -a)
-}
-
-pub fn inplace_exp(t: &mut Tensor) {
-    t.mapv_inplace(|x| x.exp());
-}
-
-pub fn inplace_ln(t: &mut Tensor) {
-    t.mapv_inplace(|x| x.ln());
-}
-
 #[cfg(test)]
 mod test {
     use super::*;

@@ -1,4 +1,4 @@
-mod datasets;
+pub mod datasets;
 
 pub trait Dataset {
     type Item;

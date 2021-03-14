@@ -28,6 +28,7 @@ impl Tensor {
             // let b2d = b.into_dimensionality::<ndarray::Ix2>().unwrap();
             // let c2d = a2d.dot(&b2d);
             // Tensor::from_ndarray(c2d.into_dyn())
+
             gemm(self, other)
         } else {
             // create a shared shape
@@ -76,8 +77,10 @@ fn gemm(a: &Tensor, b: &Tensor) -> Tensor {
     let m = a.shape[0];
     let k = a.shape[1];
     let n = b.shape[1];
+    //println!("gemm {},  {}", a.shape, b.shape);
 
     let mut v = Vec::with_capacity(m * n);
+    //println!("m, k, n {},  {}, {}", m, k, n);
 
     unsafe {
         v.set_len(m * n);
@@ -86,10 +89,12 @@ fn gemm(a: &Tensor, b: &Tensor) -> Tensor {
         let ap = a.arr().as_ptr().add(a.offset);
         let bp = b.arr().as_ptr().add(b.offset);
         let cp = v.as_mut_ptr();
+        // println!("ap, bp, cp {}, {}, {}", a.offset, b.offset, 0);
 
         let ast = a.strides();
         let bst = b.strides();
         let cst = Shape::default_strides([m, n]);
+        //println!("ap, bp, cp {:?}, {:?}, {:?}", ast, bst, cst);
 
         matrixmultiply::sgemm(
             m,

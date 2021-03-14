@@ -20,6 +20,10 @@ impl Operator<1> for Relu {
         Var::from_unary_op(x.shape(), self, x)
     }
 
+    fn is_fdb(&self) -> bool {
+        true
+    }
+
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
         let x = x[0];
         let gx = gy * binarize(x, 0.0);

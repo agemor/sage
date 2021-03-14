@@ -1,5 +1,6 @@
 use crate::tensor::shape::ToIndex;
 use crate::tensor::Tensor;
+use num_traits::FromPrimitive;
 
 impl Tensor {
     pub fn mean(&self) -> f32 {
@@ -44,7 +45,7 @@ impl Tensor {
         (self - self.mean_axis(axis, true))
             .pow(2.0)
             .sum_axis(axis, retain_axis)
-            / (self.shape[axis] - 1)
+            / (self.shape[axis] - 1) as f32
     }
 
     pub fn argmax<I>(&self, axis: I) -> Tensor
