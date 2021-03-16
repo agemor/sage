@@ -1,10 +1,18 @@
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::shape::{Shape, ToIndex};
 use crate::tensor::Tensor;
 
 // matrix operations
 struct Matmul;
+
+struct MatmulGrad1 {
+    target: Shape,
+}
+
+struct MatmulGrad2 {
+    target: Shape,
+}
 
 struct Matvec;
 
@@ -13,12 +21,103 @@ struct Transpose {
     axis_b: usize,
 }
 
+impl Operator<2> for MatmulGrad1 {
+    fn compute(&self, x: [&Tensor; 2]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        println!("{}, {}", x0.shape(), x1.shape());
+
+        DebugInfo::new("MatmulGrad1", y.shape().size())
+    }
+
+    fn forward(self, x: [&Var; 2]) -> Var {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        if x0.rank() < 2 || x1.rank() < 2 {
+            panic!("should provide a matrix");
+        }
+
+        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
+        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
+
+        // shape broadcast
+        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
+
+        // add matrix dim
+        batch.insert(-1, x0.shape()[x0.rank() - 2]);
+        batch.insert(-1, x1.shape()[x1.rank() - 2]);
+
+        // (*, A, B) = (*, A, C) (*, B, C)
+        Var::from_binary_op(self.target, self, [x0, x1])
+    }
+
+    fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
+        unimplemented!()
+    }
+}
+
+impl Operator<2> for MatmulGrad2 {
+    fn compute(&self, x: [&Tensor; 2]) -> Tensor {
+        unimplemented!()
+    }
+
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        println!("{}, {}", x0.shape(), x1.shape());
+
+        DebugInfo::new("MatmulGrad2", y.shape().size())
+    }
+
+    fn forward(self, x: [&Var; 2]) -> Var {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        if x0.rank() < 2 || x1.rank() < 2 {
+            panic!("should provide a matrix");
+        }
+
+        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
+        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
+
+        // shape broadcast
+        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
+
+        // add matrix dim
+        batch.insert(-1, x0.shape()[x0.rank() - 1]);
+        batch.insert(-1, x1.shape()[x1.rank() - 1]);
+
+        // (*, B, C) = (*, A, B) (*, A, C)
+        Var::from_binary_op(self.target, self, [x0, x1])
+    }
+
+    fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
+        unimplemented!()
+    }
+}
+
 impl Operator<2> for Matmul {
     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
         let x0 = x[0];
         let x1 = x[1];
 
         x0.matmul(x1)
+    }
+
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        let x0 = x[0];
+        let x1 = x[1];
+
+        println!("{}, {}", x0.shape(), x1.shape());
+
+        DebugInfo::new("Matmul", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -30,6 +129,7 @@ impl Operator<2> for Matmul {
         }
 
         if x0.shape()[x0.rank() - 1] != x1.shape()[x1.rank() - 2] {
+            println!("{} vs {}", x0.shape(), x1.shape());
             panic!("matrix not compatible");
         }
 
@@ -60,10 +160,12 @@ impl Operator<2> for Matmul {
         // gy: (*, A, C)
 
         // (*, A, B) = (*, A, C) (*, C, B)
-        let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
+        //let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
+        let gx0 = MatmulGrad1 { target: x0.shape() }.forward([gy, x1]);
 
         // (*, B, C) = (*, B, A) (*, A, C)
-        let gx1 = x0.transpose(-1, -2).matmul(gy).sum_to(x1.shape());
+        //let gx1 = x0.transpose(-1, -2).matmul(gy).sum_to(x1.shape());
+        let gx1 = MatmulGrad2 { target: x1.shape() }.forward([x0, gy]);
 
         [gx0, gx1]
     }
@@ -77,9 +179,19 @@ impl Operator<2> for Matvec {
         x0.matvec(x1)
     }
 
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        let x0 = x[0];
+        let x1 = x[1];
+        println!("{}, {}", x0.shape(), x1.shape());
+
+        DebugInfo::new("Matvec", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
         let x1 = x[1];
+
+        //
 
         if x0.rank() < 2 || x1.rank() < 1 {
             panic!("invalid matrix or vector");
@@ -101,10 +213,6 @@ impl Operator<2> for Matvec {
         Var::from_binary_op(batch, self, [x0, x1])
     }
 
-    fn is_fdb(&self) -> bool {
-        true
-    }
-
     fn backward(&self, x: [&Var; 2], gy: &Var) -> [Var; 2] {
         // (*, A, B)
         let x0 = x[0];
@@ -114,11 +222,35 @@ impl Operator<2> for Matvec {
 
         // gy: (*, A)
 
+        // [768, 3072], [1, 511, 3072]
+
+        // [1, 511, 3072, 1], [1, 511, 1, 768]
+
+        // (N, A, B), (N, B) -> (N, A)
+
+        // x0: [3072, 768]
+        // x1: [1, 511, 768]    ( [1, 511, 768, 1] )
+        // y: [1, 511, 3072]
+
+        // intended : 1, 511, 3072
+        // N: 1, 511
+
+        //-------------------
+
+        // (*, A, B) = (*, A, 1) (*, C, B)
+        //let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
+
+        //-----------------
+
         // (*, A, B) = (*, A, 1) (*, 1, B)
-        //let gx0 = sum_to(
-        //    &matmul(&expand(gy, gy.rank()), &expand(x1, x1.rank() - 1)),
-        //    x0.shape(),
-        //);
+        // [3072, 768] = [1, 511, 3072]   and   [1, 511, 768]
+        //
+        // transpose
+        //          [1, 511, 3072]   and   [1, 511, 768]
+
+        // [1, 511, 768, 1], [1, 511, 1, 3072]
+        // [1, 511, 768, 3072] -> [3072, 768]
+
         let gx0 = gy.unsqueeze(-1).matmul(x1.unsqueeze(-2)).sum_to(x0.shape());
 
         // (*, B) = (*, B, A) (*, A)
@@ -133,6 +265,10 @@ impl Operator<1> for Transpose {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.transpose(self.axis_a, self.axis_b)
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Transpose", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -159,11 +295,11 @@ impl Var {
         Matmul.forward([self, &other.to_var()])
     }
 
-    pub fn matvec<V: ToVar>(&self, other: V) -> Var {
-        Matvec.forward([self, &other.to_var()])
-    }
+    //pub fn matvec<V: ToVar>(&self, other: V) -> Var {
+    //    Matvec.forward([self, &other.to_var()])
+    //}
 
-    pub fn matvec_<V: ToVar>(&self, other: V) -> Var {
+    pub fn matvec<V: ToVar>(&self, other: V) -> Var {
         self.matmul(other.to_var().unsqueeze(-1)).squeeze(-1)
     }
 

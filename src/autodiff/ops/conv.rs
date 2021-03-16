@@ -1,4 +1,4 @@
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::Var;
 use crate::tensor::shape::Shape;
 use crate::tensor::Tensor;
@@ -30,7 +30,7 @@ fn get_conv_size(
     padding: usize,
     dilation: usize,
 ) -> usize {
-    (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
+    (input_size + 2 * padding - dilation * (kernel_size - 1) - 1 + stride - 1) / stride + 1
 }
 
 fn get_deconv_size(
@@ -112,6 +112,10 @@ impl Operator<1> for Im2Col {
         unimplemented!()
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Im2Col", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         // (N, C, H, W)
         let img = x[0];
@@ -165,12 +169,17 @@ impl Operator<1> for Col2Im {
         unimplemented!()
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Col2Im", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         // (N, C, KH, KW, OH, OW)
         let img = x[0];
 
-        if img.rank() != 4 {
-            panic!("only tensors with rank=4 is supported");
+        if img.rank() != 6 {
+            println!("img {}", img.shape());
+            panic!("only tensors with rank=6 is supported");
         }
 
         let batch_size = img.shape()[0];

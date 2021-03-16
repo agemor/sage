@@ -7,6 +7,7 @@ use crate::autodiff::sim::Sim;
 use crate::autodiff::var::{ToVar, Var};
 use crate::example_models::bert;
 use crate::example_models::bert::{Bert, BertConfig};
+use crate::example_models::densenet::{DenseNet, DenseNetConfig};
 use crate::layers::normalization::LayerNorm;
 use crate::layers::{Parameter, Stackable};
 use crate::tensor::Tensor;
@@ -14,11 +15,71 @@ use itertools::Itertools;
 
 // input mock
 
-pub fn bytes_to_megabytes(bytes: usize) -> f32 {
-    (bytes / 1024) as f32 / 1024.0
+pub fn f32_to_mibs(f32_arr_size: usize) -> f32 {
+    (f32_arr_size / 256) as f32 / 1024.0
+}
+pub fn mibs_to_f32(mibs: usize) -> usize {
+    mibs * 256 * 1024
 }
 
 pub fn exp1_memory_profile() {
+    fn test_densenet(batch_size: usize) {
+        let densenet = DenseNet::new(DenseNetConfig::d121());
+        densenet.init();
+
+        // Mock input data
+        let input_images = Tensor::from_elem([batch_size, 3, 224, 224], 1.0).to_var();
+        let labels = Tensor::from_elem([49, 10], 1.0).to_var();
+
+        // Bert logits (classification results)
+        let logits = densenet.forward(&input_images);
+
+        println!("{} {}", logits.shape(), labels.shape());
+
+        // Evaluate loss
+        let loss = softmax_cross_entropy(&logits, &labels);
+
+        let params = densenet.params().unwrap();
+        let grads = diff(&loss, &params);
+
+        let grad_vec = grads.values().cloned().collect_vec();
+
+        // evaluate grads
+        // forward pass
+        let mut sim = Sim::new(vec![logits], &loss);
+        sim.start();
+        sim.clear_mem();
+
+        println!("forward (unlimited): {} MB", f32_to_mibs(sim.peak_mem_used));
+
+        // backward pass
+
+        let mut sim = Sim::new(grad_vec.clone(), &loss);
+        sim.start();
+        sim.clear_mem();
+
+        println!(
+            "backward (unlimited): {} MB",
+            f32_to_mibs(sim.peak_mem_used)
+        );
+        //return;
+        // 7GB
+        for i in 1..2 {
+            let mem_budget_in_mibs = 8042;
+
+            let mut sim =
+                Sim::with_budget(grad_vec.clone(), &loss, mibs_to_f32(mem_budget_in_mibs));
+            sim.start();
+            sim.clear_mem();
+
+            println!(
+                "backward (budget: {} MB): {} MB",
+                mem_budget_in_mibs,
+                f32_to_mibs(sim.peak_mem_used)
+            );
+        }
+    }
+
     fn test_bert(batch_size: usize, word_len: usize) {
         let bert = Bert::new(BertConfig::base());
         bert.init();
@@ -40,43 +101,43 @@ pub fn exp1_memory_profile() {
         let grad_vec = grads.values().cloned().collect_vec();
 
         // evaluate grads
-
         // forward pass
-        let mut sim = Sim::new(vec![logits]);
+        let mut sim = Sim::new(vec![logits], &loss);
         sim.start();
+        sim.clear_mem();
 
-        println!(
-            "forward (unlimited): {} MB",
-            bytes_to_megabytes(sim.peak_mem_used * 4)
-        );
+        println!("forward (unlimited): {} MB", f32_to_mibs(sim.peak_mem_used));
 
         // backward pass
 
-        let mut sim = Sim::new(grad_vec.clone());
+        let mut sim = Sim::new(grad_vec.clone(), &loss);
         sim.start();
         sim.clear_mem();
 
         println!(
             "backward (unlimited): {} MB",
-            bytes_to_megabytes(sim.peak_mem_used * 4)
+            f32_to_mibs(sim.peak_mem_used)
         );
+        //return;
 
         // 7GB
-        for i in 1..6 {
-            let mem_budget = (8 - i) * 256 * 1024 * 1024;
+        for i in 1..2 {
+            let mem_budget_in_mibs = 1024;
 
-            let mut sim = Sim::with_budget(grad_vec.clone(), mem_budget);
+            let mut sim =
+                Sim::with_budget(grad_vec.clone(), &loss, mibs_to_f32(mem_budget_in_mibs));
             sim.start();
             sim.clear_mem();
 
             println!(
                 "backward (budget: {} MB): {} MB",
-                bytes_to_megabytes(mem_budget * 4),
-                bytes_to_megabytes(sim.peak_mem_used * 4)
+                mem_budget_in_mibs,
+                f32_to_mibs(sim.peak_mem_used)
             );
         }
     }
-    test_bert(1, 512);
+    test_densenet(1);
+    //test_bert(1, 512);
 }
 
 // experiment #2. minimum memory requirements

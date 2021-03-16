@@ -47,20 +47,20 @@ pub struct DenseNet {
 impl DenseNet {
     pub fn new(config: DenseNetConfig) -> Self {
         let mut model = Sequential::new();
-        let n = (config.depth - 4) / 3;
+        let n = (config.depth - 4) / 6;
 
         let mut in_planes = 2 * config.growth_rate;
 
-        model.add(box Conv2d::new(3, in_planes, 3, 1));
+        model.add(box Conv2d::new(3, in_planes, 3, 1, 1));
 
-        for i in 0..n {
+        for i in 0..3 {
             model.add(box Self::dense_layer(n, in_planes, config));
 
-            in_planes = in_planes + n * config.growth_rate;
+            in_planes += n * config.growth_rate;
 
-            if i < n - 1 {
+            if i < 2 {
                 model.add(box Self::transition_layer(in_planes, in_planes / 2, config));
-                in_planes = in_planes / 2;
+                in_planes /= 2;
             }
         }
 
@@ -78,7 +78,7 @@ impl DenseNet {
         Sequential::from(vec![
             box BatchNorm2d::new(in_planes, config.batch_norm_eps),
             box Relu,
-            box Conv2d::new(in_planes, out_planes, 1, 1),
+            box Conv2d::new(in_planes, out_planes, 1, 1, 0),
             box Dropout::new(config.dropout_prob),
             box AvgPool2d::new(2),
         ])
@@ -90,7 +90,7 @@ impl DenseNet {
                 .into_iter()
                 .map(|i| {
                     box BottleneckLayer::new(
-                        in_planes * i * config.growth_rate,
+                        in_planes + i * config.growth_rate,
                         config.growth_rate,
                         config,
                     ) as Box<dyn Stackable>
@@ -101,10 +101,17 @@ impl DenseNet {
 
     pub fn forward(&self, x: &Var) -> Var {
         let y = self.model.forward(x);
-        let batch_size = y.shape()[0];
-        let logit_size = y.shape().size() / batch_size;
-        let y = y.reshape([batch_size, logit_size]);
-        self.classifier.forward(&y)
+
+        let in_planes = self.classifier.kernel.shape()[1];
+
+        println!("{}", y.shape());
+
+        let y = y.reshape([0, in_planes]);
+        println!("{}", y.shape());
+
+        let logits = self.classifier.forward(&y);
+
+        logits
     }
 }
 
@@ -130,9 +137,9 @@ impl BottleneckLayer {
             pass: Sequential::from(vec![
                 box BatchNorm2d::new(in_planes, config.batch_norm_eps),
                 box Relu,
-                box Conv2d::new(in_planes, inter_planes, 1, 1),
+                box Conv2d::new(in_planes, inter_planes, 1, 1, 0),
                 box BatchNorm2d::new(inter_planes, config.batch_norm_eps),
-                box Conv2d::new(inter_planes, out_planes, 3, 1),
+                box Conv2d::new(inter_planes, out_planes, 3, 1, 1),
                 box Dropout::new(config.dropout_prob),
             ]),
         }
@@ -152,6 +159,12 @@ impl Parameter for BottleneckLayer {
 impl Stackable for BottleneckLayer {
     fn forward(&self, x: &Var) -> Var {
         let y = self.pass.forward(x);
+        // println!(
+        //     "x: {}    y: {}     c:{}",
+        //     x.shape(),
+        //     y.shape(),
+        //     x.concat(&y, 1).shape()
+        // );
 
         // key idea of the DenseNet
         x.concat(y, 1)

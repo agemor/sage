@@ -146,9 +146,9 @@ impl Tensor {
         let mut new_shape = self.shape;
         let mut new_strides = self.strides.clone();
 
-        for axis in axes {
-            new_shape[axis] = self.shape[axis];
-            new_strides[axis] = self.strides[axis];
+        for (i, axis) in axes.into_iter().enumerate() {
+            new_shape[i] = self.shape[axis];
+            new_strides[i] = self.strides[axis];
         }
 
         Tensor::view(self, new_shape, &new_strides, self.offset)

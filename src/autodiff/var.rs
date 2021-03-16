@@ -1,9 +1,10 @@
-use crate::autodiff::ops::{Operation, OperationEnum, Operator};
+use crate::autodiff::ops::{DebugInfo, Operation, OperationEnum, Operator};
 use crate::autodiff::session::Session;
 use crate::autodiff::Ranked;
 use crate::tensor::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
 use std::cell::{Ref, RefCell, RefMut};
+use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -72,6 +73,35 @@ impl VarNode {
 
     pub(crate) fn free_data(&mut self) {
         self.data = None;
+    }
+}
+
+// to prevent stack overflow from recursive drop (when the computational graph is dropped.)
+impl Drop for VarNode {
+    fn drop(&mut self) {
+        let mut queue = BinaryHeap::<Ranked<Var>>::new();
+
+        if let Some(op) = &self.origin {
+            for v in op.input() {
+                queue.push(v.into_ranked());
+            }
+        }
+
+        self.origin = None;
+
+        while !queue.is_empty() {
+            let var = queue.pop().unwrap().into_inner();
+
+            if let Ok(node) = Rc::try_unwrap(var.into_node()) {
+                let mut node = node.into_inner();
+                if let Some(op) = &node.origin {
+                    for v in op.input() {
+                        queue.push(v.into_ranked());
+                    }
+                }
+                node.origin = None;
+            }
+        }
     }
 }
 
@@ -158,6 +188,10 @@ impl Var {
         Ranked { inner: self, rank }
     }
 
+    pub fn into_node(self) -> Rc<RefCell<VarNode>> {
+        return self.node;
+    }
+
     pub(crate) fn to_weak(&self) -> WeakVar {
         WeakVar::from(self)
     }
@@ -219,6 +253,16 @@ impl Var {
 
     pub fn set_data(&self, data: Tensor) {
         self.node_mut().data = Some(data);
+    }
+
+    pub fn debug_info(&self) -> Option<DebugInfo> {
+        let node = self.node();
+
+        if let Some(op) = &node.origin {
+            Some(op.debug_info())
+        } else {
+            None
+        }
     }
 }
 

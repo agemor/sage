@@ -1,5 +1,5 @@
 use crate::autodiff::ops::core::scalar_mul;
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{Operator, DebugInfo};
 use crate::autodiff::var::Var;
 use crate::tensor::Tensor;
 
@@ -15,6 +15,10 @@ impl Operator<1> for Recip {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.recip()
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Recip", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -39,6 +43,10 @@ impl Operator<1> for Sqrt {
         x.sqrt()
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sqrt", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
@@ -59,6 +67,10 @@ impl Operator<1> for Pow {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.pow(self.n)
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Pow", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

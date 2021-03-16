@@ -23,16 +23,18 @@ impl Embedding {
         batch_ids
             .iter()
             .map(|ids| {
-                // (W, F)
-                ids.iter()
-                    .map(|&id| {
-                        // (1, F)
-                        self.weights.index(id, 0)
-                    })
-                    .fold1(|acc, feature| acc.concat(feature, 0))
-                    .unwrap()
-                    // (1, W, F)
-                    .unsqueeze(0)
+                self.weights.multi_index(ids.as_slice(), 0).unsqueeze(0)
+
+                // // (W, F)
+                // ids.iter()
+                //     .map(|&id| {
+                //         // (1, F)
+                //         self.weights.index(id, 0)
+                //     })
+                //     .fold1(|acc, feature| acc.concat(feature, 0))
+                //     .unwrap()
+                //     // (1, W, F)
+                //     .unsqueeze(0)
             })
             .fold1(|acc, w| acc.concat(w, 0))
             // (N, W, F)

@@ -14,13 +14,19 @@ pub struct Conv2d {
 }
 
 impl Conv2d {
-    pub fn new(in_channels: usize, out_channels: usize, kernel_size: usize, stride: usize) -> Self {
+    pub fn new(
+        in_channels: usize,
+        out_channels: usize,
+        kernel_size: usize,
+        stride: usize,
+        padding: usize,
+    ) -> Self {
         Conv2d {
             filter: Var::with_shape([in_channels * kernel_size * kernel_size, out_channels]),
             bias: Var::with_shape([out_channels]),
             kernel_size,
             stride,
-            padding: 1,
+            padding,
             dilation: 1,
         }
     }

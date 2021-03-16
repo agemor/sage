@@ -11,8 +11,8 @@ impl AvgPool2d {
     pub fn new(kernel_size: usize) -> Self {
         AvgPool2d {
             kernel_size,
-            stride: 1,
-            padding: 1,
+            stride: kernel_size,
+            padding: 0,
         }
     }
 }
@@ -51,6 +51,8 @@ impl Stackable for AvgPool2d {
         let y = col_mean
             .reshape([batch_size, col_h, col_w, in_channels])
             .permute([0, 3, 1, 2]);
+
+        //println!("x: {}      y: {}", x.shape(), y.shape());
 
         y
     }

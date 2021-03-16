@@ -42,9 +42,12 @@ impl Parameter for Sequential {
 
 impl Stackable for Sequential {
     fn forward(&self, x: &Var) -> Var {
-        self.layers
-            .iter()
-            .fold(x.clone(), |x, layer| layer.forward(&x))
+        self.layers.iter().fold(x.clone(), |x, layer| {
+            let y = layer.forward(&x);
+            //println!("{}", y.shape());
+
+            y
+        })
     }
 }
 

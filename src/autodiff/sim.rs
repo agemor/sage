@@ -5,7 +5,10 @@
 
 use crate::autodiff::var::RuntimeProfile;
 use crate::autodiff::Var;
+use crate::paper_experiments::f32_to_mibs;
 use crate::tensor::Tensor;
+use itertools::Itertools;
+use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -17,6 +20,7 @@ pub struct Sim {
 
     pub elapsed_time: Duration,
 
+    pub forward_subset: HashSet<Var>,
     pub targets: Vec<Var>,
 
     pub resolved: HashSet<Var>,
@@ -31,26 +35,49 @@ pub struct Sim {
 /// polynomial regression
 
 impl Sim {
-    pub fn new(targets: Vec<Var>) -> Self {
+    pub fn new(targets: Vec<Var>, loss: &Var) -> Self {
         Sim {
             mem_budget: 0,
             mem_used: 0,
             peak_mem_used: 0,
             elapsed_time: Duration::from_millis(0),
+            forward_subset: Self::build_subset(loss),
             targets,
             resolved: HashSet::new(),
         }
     }
 
-    pub fn with_budget(targets: Vec<Var>, mem_budget: usize) -> Self {
+    pub fn with_budget(targets: Vec<Var>, loss: &Var, mem_budget: usize) -> Self {
         Sim {
             mem_budget,
             mem_used: 0,
             peak_mem_used: 0,
             elapsed_time: Duration::from_millis(0),
+            forward_subset: Self::build_subset(loss),
             targets,
             resolved: HashSet::new(),
         }
+    }
+
+    fn build_subset(target: &Var) -> HashSet<Var> {
+        let mut res = HashSet::new();
+
+        let mut stack = Vec::<Var>::new();
+        stack.push(target.clone());
+
+        while !stack.is_empty() {
+            let var = stack.pop().unwrap();
+            res.insert(var.clone());
+            let node = var.node();
+            if let Some(ref op) = node.origin {
+                for in_var in op.input() {
+                    if !res.contains(&in_var) {
+                        stack.push(in_var.clone());
+                    }
+                }
+            }
+        }
+        res
     }
 
     fn build_depmap(&self) -> HashMap<Var, HashSet<Var>> {
@@ -59,6 +86,11 @@ impl Sim {
         // Working stack
         let mut stack = Vec::<Var>::new();
 
+        let mut total_grad_mem = 0;
+        let mut total_model_mem = 0;
+
+        println!(" * analyzing computational graph...");
+
         // Simple DFS search
         for target in self.targets.iter() {
             stack.clear();
@@ -66,6 +98,16 @@ impl Sim {
 
             while !stack.is_empty() {
                 let var = stack.pop().unwrap();
+
+                // should keep
+                if var.is_leaf() {
+                    total_model_mem += var.shape().size();
+                }
+
+                if self.targets.contains(&var) {
+                    total_grad_mem += var.shape().size();
+                }
+
                 let node = var.node();
 
                 if let Some(ref op) = node.origin {
@@ -74,12 +116,16 @@ impl Sim {
                             stack.push(in_var.clone());
                         }
 
-                        depmap.entry(in_var.clone()).or_insert(HashSet::new());
+                        depmap.entry(in_var.clone()).or_insert_with(HashSet::new);
                         depmap.get_mut(&in_var).unwrap().insert(var.clone());
                     }
                 }
             }
         }
+
+        println!("   - model mem: {} MB", f32_to_mibs(total_model_mem));
+        println!("   - grad mem: {} MB", f32_to_mibs(total_grad_mem));
+
         depmap
     }
 
@@ -88,11 +134,20 @@ impl Sim {
 
         let is_nodep = deps.iter().all(|v| v.is_evaluated());
 
-        if is_nodep {
-            self.resolved.remove(x);
+        if is_nodep && self.resolved.remove(x) {
             self.free_mem(x.shape().size());
             x.node_mut().free_data();
         }
+    }
+
+    fn real_mem_use(&self) -> usize {
+        if self.resolved.iter().any(|v| !v.is_evaluated()) {
+            panic!("something wrong");
+        }
+
+        self.resolved
+            .iter()
+            .fold(0, |acc, v| acc + v.shape().size())
     }
 
     // evaluate vars
@@ -101,28 +156,44 @@ impl Sim {
 
         // default work stack
         let mut stack = Vec::<Var>::new();
+        let mut visit_planned = HashSet::<Var>::new();
         // initialize stack with target variables
 
-        let mut tt = self.targets.clone();
-        tt.reverse();
-        stack.extend(tt);
+        stack.extend(self.targets.clone());
+        visit_planned.extend(self.targets.clone());
+
+        println!("[session started]");
 
         // depmap
         let depmap = self.build_depmap();
 
         let mut iterations = 0;
 
+        println!(" * simulating computational graph...");
+
+        if self.mem_budget == 0 {
+            println!("   - budget mem: unlimited");
+        } else {
+            println!("   - budget mem: {} MB", f32_to_mibs(self.mem_budget));
+        }
+
         while !stack.is_empty() {
             iterations += 1;
 
-            if iterations % 1000 == 0 {
-                // println!(
-                //     "[{}] stack size: {}, elapsed time: {} sec",
-                //     iterations,
-                //     stack.len(),
-                //     start_time.elapsed().as_millis() as f32 / 1000.0
-                // );
-            }
+            // if iterations % 100 == 0 {
+            //     println!(
+            //         "[{}] stack size: {}, elapsed time: {} sec",
+            //         iterations,
+            //         stack.len(),
+            //         start_time.elapsed().as_millis() as f32 / 1000.0
+            //     );
+            // }
+
+            // let mem_use_real = self.real_mem_use();
+            //
+            // if mem_use_real != self.mem_used {
+            //     panic!("wrong mem use");
+            // }
 
             //self.collect_garbage();
             let var = stack.last().cloned().unwrap();
@@ -130,7 +201,7 @@ impl Sim {
 
             // if not evaluated...
             if !var.is_evaluated() {
-                let mut node = var.node_mut();
+                let node = var.node();
 
                 // must unwrap, as a node must have either data or parent.
 
@@ -172,29 +243,70 @@ impl Sim {
                     let mem_size = node.shape.size();
 
                     // check mem budget
+                    //println!("current node : {}", op.debug_info());
+
                     if self.mem_used + mem_size > self.mem_budget && self.mem_budget != 0 {
-                        self.greedy_drop(&inputs, self.mem_used + mem_size - self.mem_budget);
+                        let mut must_keep = Vec::new();
+                        // self-closure
+                        if let Some(depmap) = depmap.get(&var) {
+                            for v in depmap.iter() {
+                                let node = v.node();
+                                if let Some(op) = &node.origin {
+                                    must_keep.extend(op.input());
+                                }
+                            }
+                        }
+
+                        must_keep.extend(inputs.clone());
+
+                        // println!("current node : {}", op.debug_info());
+                        // println!(
+                        //     "mem use: {} MB, must_keep: {}",
+                        //     f32_to_mibs(mem_size),
+                        //     must_keep.len()
+                        // );
+
+                        self.greedy_drop(&must_keep, self.mem_used + mem_size - self.mem_budget);
                     }
 
+                    if self.resolved.insert(var.clone()) {
+                        self.alloc_mem(mem_size);
+                    }
+
+                    let v = stack.pop().unwrap();
+                    visit_planned.remove(&v);
+                    resolved = true;
+
                     //self.alloc_mem(mem_size);
+
+                    drop(node);
+
+                    let mut node = var.node_mut();
+                    let mem_size = node.shape.size();
 
                     let profile = RuntimeProfile {
                         mem_store: mem_size,
                         call_time: Duration::from_secs(1), // static call time
                     };
+
                     // fill in the null tensor
                     node.data = Some(Tensor::null());
                     node.runtime = Some(profile);
-                    if self.resolved.insert(var.clone()) {
-                        self.alloc_mem(mem_size);
-                    }
 
-                    stack.pop();
-
-                    resolved = true;
                     // clear possible garbage
                 } else {
-                    stack.extend(unevaluated);
+                    //unevaluated.sort_by_key(|v| v.shape().size());
+
+                    for v in unevaluated {
+                        if visit_planned.contains(&v) {
+                            // re-prioritize stack
+                            let (i, _) = stack.iter().find_position(|&v| v.eq(&v)).unwrap();
+                            stack.remove(i);
+                        }
+                        stack.push(v);
+                    }
+
+                    // stack.extend(unevaluated);
                 }
             }
             // already evaluated
@@ -204,11 +316,18 @@ impl Sim {
                 if self.resolved.insert(var.clone()) {
                     self.alloc_mem(var.shape().size());
                 }
-                stack.pop();
+
+                let v = stack.pop().unwrap();
+                visit_planned.remove(&v);
+
+                //stack.pop();
+                resolved = true;
             }
 
             // clear intermediate dependencies.
             if resolved {
+                //visit_planned.remove(&var);
+
                 let var_node = var.node();
                 let origin = var_node.origin.as_ref().unwrap();
 
@@ -218,19 +337,89 @@ impl Sim {
                     }
                 })
             }
+
+            if self.mem_used > self.mem_budget && self.mem_budget != 0 {
+                self.greedy_drop(&[var], self.mem_used - self.mem_budget);
+            }
         }
 
-        self.elapsed_time = start_time.elapsed();
-        println!("elapsed time: {} sec", self.elapsed_time.as_secs());
-        println!("total iterations: {}", iterations);
+        println!("   - peak mem: {} MB", f32_to_mibs(self.peak_mem_used));
+
+        println!(
+            "[session closed] total iterations: {}, elapsed time: {} sec",
+            iterations,
+            start_time.elapsed().as_millis() as f32 / 1000.0
+        );
     }
 
-    pub fn clear_mem(&mut self) {
-        self.resolved.iter().for_each(|v| {
-            if !v.is_leaf() {
-                v.node_mut().free_data();
+    // Greedy activation drop
+    fn greedy_drop(&mut self, must_keep: &[Var], mem_req: usize) {
+        // free ones that have minimum T/M
+        let mut mem_freed = 0;
+        let mut iterations = 0;
+
+        let rank = must_keep[0].rank();
+
+        fn dist(a: usize, b: usize) -> usize {
+            if a > b {
+                a - b
+            } else {
+                b - a
             }
-        })
+        }
+
+        while mem_freed < mem_req {
+            iterations += 1;
+            // find variable node with minimum re-computation heuristic (time/space)
+            let min_heuristic_var = self
+                .resolved
+                .iter()
+                .filter(|v| {
+                    !must_keep.contains(v) && !v.is_leaf()
+                    //&& !self.targets.contains(v)
+                    // && self.forward_subset.contains(v)
+                })
+                .max_by_key(|v| v.shape().size())
+                .cloned();
+
+            if let Some(var) = min_heuristic_var {
+                // must unwrap
+                //println!("freed node : {}", var.debug_info().unwrap());
+
+                let mut var_node = var.node_mut();
+
+                if self.resolved.remove(&var) {
+                    let mem_size = var_node.shape.size();
+
+                    var_node.free_data();
+                    self.free_mem(mem_size);
+                    mem_freed += mem_size;
+                }
+            } else {
+                let mm = self
+                    .resolved
+                    .iter()
+                    .filter(|v| {
+                        must_keep.contains(v) || v.is_leaf()
+                        //   || self.targets.contains(v)
+                        //   || !(self.forward_subset.contains(v))
+                    })
+                    .fold(0, |acc, v| acc + v.shape().size());
+
+                panic!(
+                    "cannot free more! occupied: {} MB, requested: {} MB, fixed: {} MB",
+                    f32_to_mibs(self.mem_used),
+                    f32_to_mibs(mem_req),
+                    f32_to_mibs(mm)
+                );
+            }
+        }
+        println!(
+            "[{}] required: {}, freed: {} MB",
+            iterations,
+            f32_to_mibs(mem_req),
+            f32_to_mibs(mem_freed)
+        );
     }
 
     // Garbage collector for variable graph evaluation
@@ -288,45 +477,23 @@ impl Sim {
         });
     }
 
-    // Greedy activation drop
-    fn greedy_drop(&mut self, must_keep: &[Var], mem_req: usize) {
-        // free ones that have minimum T/M
-        let mut mem_freed = 0;
-
-        while mem_freed < mem_req {
-            // find variable node with minimum re-computation heuristic (time/space)
-            let min_heuristic_var = self
-                .resolved
-                .iter()
-                .filter(|v| !must_keep.contains(v) && !v.is_leaf() && !self.targets.contains(v))
-                .min_by_key(|v| {
-                    v.node().recompute_heuristic().unwrap() // must unwrap
-                })
-                .cloned();
-
-            if let Some(var) = min_heuristic_var {
-                let mut var_node = var.node_mut();
-
-                if self.resolved.remove(&var) {
-                    let mem_size = var_node.shape.size();
-
-                    var_node.free_data();
-                    self.free_mem(mem_size);
-                    mem_freed += mem_size;
-                }
-            };
-        }
+    pub fn clear_mem(&mut self) {
+        self.resolved.iter().for_each(|v| {
+            if !v.is_leaf() {
+                v.node_mut().free_data();
+            }
+        })
     }
 
     fn alloc_mem(&mut self, size: usize) {
         self.mem_used += size;
         if self.mem_used > self.peak_mem_used {
-            //println!("new peak: {}", self.mem_used * 4 / 1024 / 1024);
+            //println!("new peak: {}", self.mem_used/ 1024 / 1024);
             self.peak_mem_used = self.mem_used
         }
     }
 
     fn free_mem(&mut self, size: usize) {
-        self.mem_used -= size;
+        self.mem_used -= cmp::min(size, self.mem_used);
     }
 }

@@ -1,4 +1,4 @@
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{Operator, DebugInfo};
 use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::Tensor;
 
@@ -14,6 +14,10 @@ impl Operator<2> for SoftmaxCrossEntropy {
         let log_z = x0 - x0.log_sum_exp(1, true); // ln10
         let log_p = log_z * t;
         -log_p.sum_axis(1, false)
+    }
+
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("SoftmaxCrossEntropy", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {

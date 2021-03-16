@@ -1,4 +1,4 @@
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{Operator, DebugInfo};
 use crate::autodiff::var::Var;
 use crate::tensor::Tensor;
 
@@ -13,6 +13,10 @@ impl Operator<1> for Relu {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Relu", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -36,6 +40,10 @@ impl Operator<1> for Binarize {
         let x = x[0];
 
         x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Binarize", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

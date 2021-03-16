@@ -220,11 +220,12 @@ impl Shape {
             panic!("some axes are not used, or used more than once");
         }
 
-        let shape_copy = self.clone();
+        let shape_copy = *self;
 
-        for axis in axes {
-            self.sizes[axis] = shape_copy[axis];
+        for (i, axis) in axes.into_iter().enumerate() {
+            self.sizes[i] = shape_copy[axis];
         }
+
         self
     }
 

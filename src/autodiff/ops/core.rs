@@ -1,4 +1,4 @@
-use crate::autodiff::ops::Operator;
+use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::shape::{Shape, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
@@ -78,6 +78,17 @@ struct UnselectSlice {
     axis: usize,
 }
 
+struct SelectMultiIndex {
+    indices: Vec<usize>,
+    axis: usize,
+}
+
+struct UnselectMultiIndex {
+    indices: Vec<usize>,
+    size: usize,
+    axis: usize,
+}
+
 struct Concat {
     axis: usize,
 }
@@ -102,6 +113,10 @@ impl Operator<2> for Add {
         let x1 = x[1];
 
         x0 + x1
+    }
+
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Add", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -131,6 +146,10 @@ impl Operator<2> for Sub {
         x0 - x1
     }
 
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sub", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
         let x1 = x[1];
@@ -156,6 +175,10 @@ impl Operator<1> for Neg {
         -x
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Neg", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
@@ -173,6 +196,10 @@ impl Operator<2> for Mul {
         let x1 = x[1];
 
         x0 * x1
+    }
+
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Mul", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -205,6 +232,10 @@ impl Operator<2> for Div {
         x0 / x1
     }
 
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Div", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
         let x1 = x[1];
@@ -234,6 +265,10 @@ impl Operator<1> for ScalarAdd {
         x + self.scalar
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarAdd", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
@@ -249,6 +284,10 @@ impl Operator<1> for ScalarSub {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x - self.scalar
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarSub", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -268,6 +307,10 @@ impl Operator<1> for ScalarMul {
         x * self.scalar
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarMul", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
@@ -285,6 +328,10 @@ impl Operator<1> for ScalarDiv {
         x / self.scalar
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarDiv", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
@@ -300,6 +347,10 @@ impl Operator<1> for Sum {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.sum_axis(self.axis, self.retain_axis)
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sum", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -357,6 +408,10 @@ impl Operator<1> for SumTo {
         y
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("SumTo", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
 
@@ -380,6 +435,10 @@ impl Operator<1> for BroadcastTo {
         let x = x[0];
 
         x.upcast(self.shape).unwrap()
+    }
+
+    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+        DebugInfo::new("BroadcastTo", x[0].shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -408,6 +467,10 @@ impl Operator<1> for Reshape {
         x.reshape(self.to).unwrap()
     }
 
+    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+        DebugInfo::new("Reshape", x[0].shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
 
@@ -433,10 +496,15 @@ impl Operator<1> for Permute {
         x.permute(self.axes.as_slice())
     }
 
+    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+        DebugInfo::new("Permute", x[0].shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         let mut shape = x.shape();
         shape.permute(self.axes.as_slice());
+
         Var::from_unary_op(shape, self, x)
     }
 
@@ -463,6 +531,10 @@ impl Operator<1> for SelectIndex {
         x.index_axis(self.index, self.axis)
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("SelectIndex", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x: &Var = x[0];
 
@@ -483,6 +555,10 @@ impl Operator<1> for SelectIndex {
 impl Operator<1> for UnselectIndex {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         unimplemented!();
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("UnselectIndex", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -510,6 +586,10 @@ impl Operator<1> for SelectSlice {
         x.slice_axis(self.index, self.index + self.slice_size, self.axis)
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("SelectSlice", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x: &Var = x[0];
 
@@ -534,6 +614,10 @@ impl Operator<1> for UnselectSlice {
         unimplemented!();
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("UnselectSlice", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x: &Var = x[0];
 
@@ -549,12 +633,70 @@ impl Operator<1> for UnselectSlice {
     }
 }
 
+impl Operator<1> for SelectMultiIndex {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        let x = x[0];
+
+        unimplemented!();
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("SelectMultiIndex", y.shape().size())
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x: &Var = x[0];
+
+        let mut shape = x.shape();
+        shape.replace(self.axis, self.indices.len());
+
+        Var::from_unary_op(shape, self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let x = x[0];
+        let orig_size = x.shape()[self.axis];
+        let gx = gy.unselect_multi_index(self.indices.as_slice(), orig_size, self.axis);
+        [gx]
+    }
+}
+
+impl Operator<1> for UnselectMultiIndex {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        unimplemented!();
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("UnselectMultiIndex", y.shape().size())
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x: &Var = x[0];
+
+        let mut shape = x.shape();
+        if shape[self.axis] != self.indices.len() {
+            panic!("invalid target axis size");
+        }
+        shape.replace(self.axis, self.size);
+        Var::from_unary_op(shape, self, x)
+    }
+
+    fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let gx = gy.multi_index(self.indices.as_slice(), self.axis);
+        [gx]
+    }
+}
+
 impl Operator<2> for Concat {
     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
         let x0 = x[0];
         let x1 = x[1];
 
         Tensor::cat(&[x0, x1], self.axis).unwrap()
+    }
+
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Concat", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -597,6 +739,10 @@ impl Operator<2> for Stack {
         Tensor::stack(&[x0, x1], self.axis).unwrap()
     }
 
+    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Stack", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
         let x1 = x[1];
@@ -629,6 +775,10 @@ impl Operator<1> for Expand {
         x.expand_dims(self.axis)
     }
 
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Expand", y.shape().size())
+    }
+
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         let mut shape = x.shape();
@@ -647,6 +797,10 @@ impl Operator<1> for Squeeze {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.squeeze(self.axis)
+    }
+
+    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Squeeze", y.shape().size())
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -854,6 +1008,35 @@ impl Var {
         .forward([self])
     }
 
+    pub fn multi_index<I, J>(&self, indices: I, axis: J) -> Var
+    where
+        I: ToIndices,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        SelectMultiIndex {
+            indices: indices.to_indices(self.shape()[axis]),
+            axis,
+        }
+        .forward([self])
+    }
+
+    fn unselect_multi_index<I, J>(&self, indices: I, size: usize, axis: J) -> Var
+    where
+        I: ToIndices,
+        J: ToIndex,
+    {
+        let axis = axis.to_index(self.rank());
+
+        UnselectMultiIndex {
+            indices: indices.to_indices(size),
+            size,
+            axis,
+        }
+        .forward([self])
+    }
+
     pub fn squeeze<I>(&self, axis: I) -> Var
     where
         I: ToIndex,
@@ -922,7 +1105,6 @@ impl_op!(-|a: &Var| -> Var { neg(a) });
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::autodiff::diff;
 
