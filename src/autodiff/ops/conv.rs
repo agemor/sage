@@ -17,6 +17,8 @@ pub struct Im2Col {
 }
 
 pub struct Col2Im {
+    img_w: usize,
+    img_h: usize,
     kernel_size: usize,
     stride: usize,
     padding: usize,
@@ -158,8 +160,20 @@ impl Operator<1> for Im2Col {
         Var::from_unary_op(shape, self, img)
     }
 
-    fn backward(&self, _x: [&Var; 1], gy: &Var) -> [Var; 1] {
-        let gx = gy.col2im(self.kernel_size, self.stride, self.padding, self.dilation);
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let img: &Var = x[0];
+
+        let img_h = img.shape()[2];
+        let img_w = img.shape()[3];
+
+        let gx = gy.col2im(
+            img_w,
+            img_h,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+        );
         [gx]
     }
 }
@@ -169,7 +183,16 @@ impl Operator<1> for Col2Im {
         unimplemented!()
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        println!(
+            "{}, {}, {}, {}, {}",
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            x[0].shape()
+        );
+
         DebugInfo::new("Col2Im", y.shape().size())
     }
 
@@ -204,7 +227,7 @@ impl Operator<1> for Col2Im {
             self.dilation,
         );
 
-        let shape = [batch_size, channels, img_h, img_w];
+        let shape = [batch_size, channels, self.img_h, self.img_w];
 
         Var::from_unary_op(shape, self, img)
     }
@@ -234,12 +257,16 @@ impl Var {
 
     pub fn col2im(
         &self,
+        img_w: usize,
+        img_h: usize,
         kernel_size: usize,
         stride: usize,
         padding: usize,
         dilation: usize,
     ) -> Var {
         Col2Im {
+            img_w,
+            img_h,
             kernel_size,
             stride,
             padding,

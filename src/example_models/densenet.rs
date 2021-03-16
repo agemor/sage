@@ -66,7 +66,7 @@ impl DenseNet {
 
         model.add(box BatchNorm2d::new(in_planes, config.batch_norm_eps));
         model.add(box Relu);
-        model.add(box AvgPool2d::new(8));
+       // model.add(box AvgPool2d::new(8));
 
         DenseNet {
             model,
@@ -101,13 +101,9 @@ impl DenseNet {
 
     pub fn forward(&self, x: &Var) -> Var {
         let y = self.model.forward(x);
+        let pooled = AvgPool2d::new(y.shape()[2]).forward(&y);
 
-        let in_planes = self.classifier.kernel.shape()[1];
-
-        println!("{}", y.shape());
-
-        let y = y.reshape([0, in_planes]);
-        println!("{}", y.shape());
+        let y = pooled.reshape([y.shape()[0], 0]);
 
         let logits = self.classifier.forward(&y);
 

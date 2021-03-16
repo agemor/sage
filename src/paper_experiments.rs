@@ -12,6 +12,7 @@ use crate::layers::normalization::LayerNorm;
 use crate::layers::{Parameter, Stackable};
 use crate::tensor::Tensor;
 use itertools::Itertools;
+use crate::example_models::resnet::{ResNet, ResNetConfig};
 
 // input mock
 
@@ -23,13 +24,74 @@ pub fn mibs_to_f32(mibs: usize) -> usize {
 }
 
 pub fn exp1_memory_profile() {
+
+    fn test_resnet(batch_size:usize) {
+
+        let resnet = ResNet::new(ResNetConfig::d50());
+        resnet.init();
+
+        // Mock input data
+        let input_images = Tensor::from_elem([batch_size, 3, 224, 224], 1.0).to_var();
+        let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
+
+        // Bert logits (classification results)
+        let logits = resnet.forward(&input_images);
+
+        println!("{} {}", logits.shape(), labels.shape());
+
+        // Evaluate loss
+        let loss = softmax_cross_entropy(&logits, &labels);
+
+        let params = resnet.params().unwrap();
+        let grads = diff(&loss, &params);
+
+        let grad_vec = grads.values().cloned().collect_vec();
+
+        // evaluate grads
+        // forward pass
+        let mut sim = Sim::new(vec![logits], &loss);
+        sim.start();
+        sim.clear_mem();
+
+        println!("forward (unlimited): {} MB", f32_to_mibs(sim.peak_mem_used));
+
+        // backward pass
+
+        let mut sim = Sim::new(grad_vec.clone(), &loss);
+        sim.start();
+        sim.clear_mem();
+
+        println!(
+            "backward (unlimited): {} MB",
+            f32_to_mibs(sim.peak_mem_used)
+        );
+
+        //return;
+        // 7GB
+        for i in 1..2 {
+            let mem_budget_in_mibs = 3000;
+
+            let mut sim =
+                Sim::with_budget(grad_vec.clone(), &loss, mibs_to_f32(mem_budget_in_mibs));
+            sim.start();
+            sim.clear_mem();
+
+            println!(
+                "backward (budget: {} MB): {} MB",
+                mem_budget_in_mibs,
+                f32_to_mibs(sim.peak_mem_used)
+            );
+        }
+
+    }
+
     fn test_densenet(batch_size: usize) {
         let densenet = DenseNet::new(DenseNetConfig::d121());
         densenet.init();
 
         // Mock input data
         let input_images = Tensor::from_elem([batch_size, 3, 224, 224], 1.0).to_var();
-        let labels = Tensor::from_elem([49, 10], 1.0).to_var();
+        let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
 
         // Bert logits (classification results)
         let logits = densenet.forward(&input_images);
@@ -62,10 +124,11 @@ pub fn exp1_memory_profile() {
             "backward (unlimited): {} MB",
             f32_to_mibs(sim.peak_mem_used)
         );
+
         //return;
         // 7GB
         for i in 1..2 {
-            let mem_budget_in_mibs = 8042;
+            let mem_budget_in_mibs = 3000;
 
             let mut sim =
                 Sim::with_budget(grad_vec.clone(), &loss, mibs_to_f32(mem_budget_in_mibs));
@@ -106,7 +169,7 @@ pub fn exp1_memory_profile() {
         sim.start();
         sim.clear_mem();
 
-        println!("forward (unlimited): {} MB", f32_to_mibs(sim.peak_mem_used));
+        println!("forward pass (unlimited): {} MB", f32_to_mibs(sim.peak_mem_used));
 
         // backward pass
 
@@ -115,7 +178,7 @@ pub fn exp1_memory_profile() {
         sim.clear_mem();
 
         println!(
-            "backward (unlimited): {} MB",
+            "backward pass (unlimited): {} MB",
             f32_to_mibs(sim.peak_mem_used)
         );
         //return;
@@ -130,13 +193,13 @@ pub fn exp1_memory_profile() {
             sim.clear_mem();
 
             println!(
-                "backward (budget: {} MB): {} MB",
+                "backward pass (budget: {} MB): {} MB",
                 mem_budget_in_mibs,
                 f32_to_mibs(sim.peak_mem_used)
             );
         }
     }
-    test_densenet(1);
+    test_resnet(1);
     //test_bert(1, 512);
 }
 

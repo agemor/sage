@@ -19,6 +19,10 @@ impl Sequential {
     pub fn add(&mut self, layer: Box<dyn Stackable>) {
         self.layers.push(layer);
     }
+
+    pub fn extend(&mut self, layers: Vec<Box<dyn Stackable>>) {
+        self.layers.extend(layers);
+    }
 }
 
 impl Parameter for Sequential {
@@ -44,8 +48,6 @@ impl Stackable for Sequential {
     fn forward(&self, x: &Var) -> Var {
         self.layers.iter().fold(x.clone(), |x, layer| {
             let y = layer.forward(&x);
-            //println!("{}", y.shape());
-
             y
         })
     }

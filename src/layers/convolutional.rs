@@ -49,6 +49,10 @@ impl Stackable for Conv2d {
     fn forward(&self, x: &Var) -> Var {
         let batch_size = x.shape()[0];
 
+
+
+        //println!("{}          kernel_size: {}, stride: {}, padding: {}", self.filter.shape(), self.kernel_size, self.stride, self.padding);
+
         let col = x.im2col(self.kernel_size, self.stride, self.padding, self.dilation);
 
         let col_h = col.shape()[4];
@@ -64,6 +68,8 @@ impl Stackable for Conv2d {
         let y = out
             .reshape([batch_size, col_h, col_w, 0])
             .permute([0, 3, 1, 2]);
+
+        // println!("{} -> {}          kernel_size: {}, stride: {}, padding: {}", x.shape(), y.shape(), self.kernel_size, self.stride, self.padding);
 
         y
     }

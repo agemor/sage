@@ -1,4 +1,4 @@
-use crate::autodiff::ops::{Operator, DebugInfo};
+use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::Var;
 use crate::tensor::Tensor;
 
@@ -22,10 +22,6 @@ impl Operator<1> for Relu {
     fn forward(self, x: [&Var; 1]) -> Var {
         let x = x[0];
         Var::from_unary_op(x.shape(), self, x)
-    }
-
-    fn is_fdb(&self) -> bool {
-        true
     }
 
     fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {

@@ -23,6 +23,8 @@ pub struct Sim {
     pub forward_subset: HashSet<Var>,
     pub targets: Vec<Var>,
 
+    pub global_lock: HashSet<Var>,
+
     pub resolved: HashSet<Var>,
 }
 
@@ -43,6 +45,7 @@ impl Sim {
             elapsed_time: Duration::from_millis(0),
             forward_subset: Self::build_subset(loss),
             targets,
+            global_lock: HashSet::new(),
             resolved: HashSet::new(),
         }
     }
@@ -55,6 +58,7 @@ impl Sim {
             elapsed_time: Duration::from_millis(0),
             forward_subset: Self::build_subset(loss),
             targets,
+            global_lock: HashSet::new(),
             resolved: HashSet::new(),
         }
     }
@@ -171,12 +175,6 @@ impl Sim {
 
         println!(" * simulating computational graph...");
 
-        if self.mem_budget == 0 {
-            println!("   - budget mem: unlimited");
-        } else {
-            println!("   - budget mem: {} MB", f32_to_mibs(self.mem_budget));
-        }
-
         while !stack.is_empty() {
             iterations += 1;
 
@@ -209,6 +207,10 @@ impl Sim {
                     .origin
                     .as_ref()
                     .expect("some parameters are not initialized.");
+
+                // acquire global lock for this variable node
+                self.global_lock.extend(op.input());
+                //self.global_lock.insert(op.output().unwrap());
 
                 let unevaluated = op
                     .input()
@@ -275,6 +277,12 @@ impl Sim {
 
                     let v = stack.pop().unwrap();
                     visit_planned.remove(&v);
+
+                    // release global lock
+                    inputs.iter().for_each(|v| {
+                        self.global_lock.remove(v);
+                    });
+
                     resolved = true;
 
                     //self.alloc_mem(mem_size);
@@ -343,6 +351,12 @@ impl Sim {
             }
         }
 
+        if self.mem_budget == 0 {
+            println!("   - budget mem: unlimited");
+        } else {
+            println!("   - budget mem: {} MB", f32_to_mibs(self.mem_budget));
+        }
+
         println!("   - peak mem: {} MB", f32_to_mibs(self.peak_mem_used));
 
         println!(
@@ -359,6 +373,7 @@ impl Sim {
         let mut iterations = 0;
 
         let rank = must_keep[0].rank();
+        let now = Instant::now();
 
         fn dist(a: usize, b: usize) -> usize {
             if a > b {
@@ -374,13 +389,13 @@ impl Sim {
             let min_heuristic_var = self
                 .resolved
                 .iter()
-                .filter(|v| {
-                    !must_keep.contains(v) && !v.is_leaf()
-                    //&& !self.targets.contains(v)
-                    // && self.forward_subset.contains(v)
-                })
+                .filter(|v| !self.global_lock.contains(v) && !v.is_leaf())
                 .max_by_key(|v| v.shape().size())
                 .cloned();
+
+            // ! must_keep.contains(v)()
+            //&& !self.targets.contains(v)
+            // && self.forward_subset.contains(v)
 
             if let Some(var) = min_heuristic_var {
                 // must unwrap
@@ -400,7 +415,8 @@ impl Sim {
                     .resolved
                     .iter()
                     .filter(|v| {
-                        must_keep.contains(v) || v.is_leaf()
+                        self.global_lock.contains(v) || v.is_leaf()
+                        //must_keep.contains(v) || v.is_leaf()
                         //   || self.targets.contains(v)
                         //   || !(self.forward_subset.contains(v))
                     })
@@ -414,11 +430,13 @@ impl Sim {
                 );
             }
         }
+
         println!(
-            "[{}] required: {}, freed: {} MB",
-            iterations,
+            "  *   [gc] requested mem: {} MB, freed: {} MB  (affected: {}, time: {} sec)",
             f32_to_mibs(mem_req),
-            f32_to_mibs(mem_freed)
+            f32_to_mibs(mem_freed),
+            iterations,
+            (now.elapsed().as_millis() as f32) / 1000.0,
         );
     }
 

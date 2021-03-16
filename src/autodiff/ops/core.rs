@@ -203,8 +203,12 @@ impl Operator<2> for Mul {
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
-        let x0 = x[0];
+        let x0:&Var = x[0];
         let x1 = x[1];
+
+        if let Err(_) = Shape::union(x0.shape(), x1.shape()) {
+            println!("{}, {}", x0.debug_info().unwrap(), x1.debug_info().unwrap());
+        }
 
         let shape = Shape::union(x0.shape(), x1.shape()).unwrap();
         Var::from_binary_op(shape, self, [x0, x1])
