@@ -8,9 +8,9 @@ use crate::autodiff::Var;
 use crate::paper_experiments::f32_to_mibs;
 use crate::tensor::Tensor;
 use itertools::Itertools;
-use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use std::{cmp, fmt};
 
 // Variable evaluation session
 pub struct Sim {
@@ -18,14 +18,30 @@ pub struct Sim {
     pub mem_used: usize,
     pub peak_mem_used: usize,
 
-    pub elapsed_time: Duration,
+    pub model_mem: usize,
+    pub total_iter: usize,
+    pub elapsed_time: f32,
 
-    pub forward_subset: HashSet<Var>,
     pub targets: Vec<Var>,
+    pub iter_threshold: usize,
 
     pub global_lock: HashSet<Var>,
 
     pub resolved: HashSet<Var>,
+}
+
+impl fmt::Display for Sim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "mem_budget: {}, model_mem: {} MB, peak_mem: {} MB, total_iter: {}, elapsed_time: {} sec",
+            f32_to_mibs(self.mem_budget),
+            f32_to_mibs(self.model_mem),
+            f32_to_mibs(self.peak_mem_used),
+            self.total_iter,
+            self.elapsed_time
+        )
+    }
 }
 
 ///
@@ -37,27 +53,31 @@ pub struct Sim {
 /// polynomial regression
 
 impl Sim {
-    pub fn new(targets: Vec<Var>, loss: &Var) -> Self {
+    pub fn new(targets: Vec<Var>) -> Self {
         Sim {
             mem_budget: 0,
             mem_used: 0,
             peak_mem_used: 0,
-            elapsed_time: Duration::from_millis(0),
-            forward_subset: Self::build_subset(loss),
+            elapsed_time: 0.0,
+            model_mem: 0,
+            total_iter: 0,
             targets,
+            iter_threshold: 0,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
         }
     }
 
-    pub fn with_budget(targets: Vec<Var>, loss: &Var, mem_budget: usize) -> Self {
+    pub fn with_budget(targets: Vec<Var>, mem_budget: usize, iter_threshold: usize) -> Self {
         Sim {
             mem_budget,
             mem_used: 0,
             peak_mem_used: 0,
-            elapsed_time: Duration::from_millis(0),
-            forward_subset: Self::build_subset(loss),
+            elapsed_time: 0.0,
+            model_mem: 0,
+            total_iter: 0,
             targets,
+            iter_threshold,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
         }
@@ -84,7 +104,7 @@ impl Sim {
         res
     }
 
-    fn build_depmap(&self) -> HashMap<Var, HashSet<Var>> {
+    fn build_depmap(&mut self) -> HashMap<Var, HashSet<Var>> {
         let mut depmap = HashMap::<Var, HashSet<Var>>::new();
 
         // Working stack
@@ -93,7 +113,7 @@ impl Sim {
         let mut total_grad_mem = 0;
         let mut total_model_mem = 0;
 
-        println!(" * analyzing computational graph...");
+        //println!(" * analyzing computational graph...");
 
         // Simple DFS search
         for target in self.targets.iter() {
@@ -126,9 +146,10 @@ impl Sim {
                 }
             }
         }
+        self.model_mem = total_model_mem;
 
-        println!("   - model mem: {} MB", f32_to_mibs(total_model_mem));
-        println!("   - grad mem: {} MB", f32_to_mibs(total_grad_mem));
+        //println!("   - model mem: {} MB", f32_to_mibs(total_model_mem));
+        //println!("   - grad mem: {} MB", f32_to_mibs(total_grad_mem));
 
         depmap
     }
@@ -155,8 +176,10 @@ impl Sim {
     }
 
     // evaluate vars
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> bool {
         let start_time = Instant::now();
+        let mut comp_time: usize = 0;
+        let mut recomp_time: usize = 0;
 
         // default work stack
         let mut stack = Vec::<Var>::new();
@@ -166,17 +189,21 @@ impl Sim {
         stack.extend(self.targets.clone());
         visit_planned.extend(self.targets.clone());
 
-        println!("[session started]");
+        // println!("[session started]");
 
         // depmap
         let depmap = self.build_depmap();
 
         let mut iterations = 0;
 
-        println!(" * simulating computational graph...");
+        //println!(" * simulating computational graph...");
 
         while !stack.is_empty() {
             iterations += 1;
+
+            if iterations > self.iter_threshold && self.iter_threshold != 0 {
+                return false;
+            }
 
             // if iterations % 100 == 0 {
             //     println!(
@@ -268,10 +295,13 @@ impl Sim {
                         //     must_keep.len()
                         // );
 
-                        self.greedy_drop(&must_keep, self.mem_used + mem_size - self.mem_budget);
+                        recomp_time += self
+                            .greedy_drop(&must_keep, self.mem_used + mem_size - self.mem_budget);
                     }
 
                     if self.resolved.insert(var.clone()) {
+                        comp_time += op.debug_info().comp_time;
+
                         self.alloc_mem(mem_size);
                     }
 
@@ -350,30 +380,38 @@ impl Sim {
                 self.greedy_drop(&[var], self.mem_used - self.mem_budget);
             }
         }
+        //
+        // if self.mem_budget == 0 {
+        //     println!("   - budget mem: unlimited");
+        // } else {
+        //     println!("   - budget mem: {} MB", f32_to_mibs(self.mem_budget));
+        // }
+        //
+        // println!("   - peak mem: {} MB", f32_to_mibs(self.peak_mem_used));
+        //
+        // println!("   - comp time: {} millis", comp_time / 1024 / 1024 / 1024);
 
-        if self.mem_budget == 0 {
-            println!("   - budget mem: unlimited");
-        } else {
-            println!("   - budget mem: {} MB", f32_to_mibs(self.mem_budget));
-        }
+        self.total_iter = iterations;
+        self.elapsed_time = start_time.elapsed().as_millis() as f32 / 1000.0;
 
-        println!("   - peak mem: {} MB", f32_to_mibs(self.peak_mem_used));
+        // println!(
+        //     "[session closed] total iterations: {}, elapsed time: {} sec",
+        //     iterations,
+        //     start_time.elapsed().as_millis() as f32 / 1000.0
+        // );
 
-        println!(
-            "[session closed] total iterations: {}, elapsed time: {} sec",
-            iterations,
-            start_time.elapsed().as_millis() as f32 / 1000.0
-        );
+        return true;
     }
 
     // Greedy activation drop
-    fn greedy_drop(&mut self, must_keep: &[Var], mem_req: usize) {
+    fn greedy_drop(&mut self, must_keep: &[Var], mem_req: usize) -> usize {
         // free ones that have minimum T/M
         let mut mem_freed = 0;
         let mut iterations = 0;
 
         let rank = must_keep[0].rank();
         let now = Instant::now();
+        let mut recomp_time = 0;
 
         fn dist(a: usize, b: usize) -> usize {
             if a > b {
@@ -391,6 +429,7 @@ impl Sim {
                 .iter()
                 .filter(|v| !self.global_lock.contains(v) && !v.is_leaf())
                 .max_by_key(|v| v.shape().size())
+                //.min_by_key(|v| (v.node().recompute_heuristic().unwrap() * 100000.0) as usize)
                 .cloned();
 
             // ! must_keep.contains(v)()
@@ -401,9 +440,11 @@ impl Sim {
                 // must unwrap
                 //println!("freed node : {}", var.debug_info().unwrap());
 
-                let mut var_node = var.node_mut();
-
                 if self.resolved.remove(&var) {
+                    recomp_time += var.debug_info().unwrap().comp_time;
+
+                    let mut var_node = var.node_mut();
+
                     let mem_size = var_node.shape.size();
 
                     var_node.free_data();
@@ -431,13 +472,15 @@ impl Sim {
             }
         }
 
-        println!(
-            "  *   [gc] requested mem: {} MB, freed: {} MB  (affected: {}, time: {} sec)",
-            f32_to_mibs(mem_req),
-            f32_to_mibs(mem_freed),
-            iterations,
-            (now.elapsed().as_millis() as f32) / 1000.0,
-        );
+        // println!(
+        //     "  *   [gc] requested mem: {} MB, freed: {} MB  (affected: {}, time: {} sec)",
+        //     f32_to_mibs(mem_req),
+        //     f32_to_mibs(mem_freed),
+        //     iterations,
+        //     (now.elapsed().as_millis() as f32) / 1000.0,
+        // );
+
+        recomp_time
     }
 
     // Garbage collector for variable graph evaluation

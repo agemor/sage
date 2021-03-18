@@ -26,10 +26,10 @@ impl VarNode {
         }
     }
 
-    pub fn recompute_heuristic(&self) -> Option<u128> {
+    pub fn recompute_heuristic(&self) -> Option<f64> {
         if let Some(ref runtime) = self.runtime {
-            let time = self.recompute_time().as_nanos();
-            let space = runtime.mem_store as u128;
+            let time = self.recompute_time() as f64;
+            let space = runtime.mem_store as f64;
             Some(time / space)
         } else {
             None
@@ -37,9 +37,9 @@ impl VarNode {
     }
 
     // get re-computation cost, in a dynamic-programming fashion.
-    fn recompute_time(&self) -> Duration {
+    fn recompute_time(&self) -> usize {
         if let Some(ref operation) = self.origin {
-            let mut time = Duration::new(0, 0);
+            let mut time = 0;
             let mut stack = Vec::<Var>::new();
 
             // must unwrap. "I, myself is the proof"
@@ -52,11 +52,16 @@ impl VarNode {
 
                 // overhead of op_node itself
                 // must unwrap, as un-evaluated VarNodes are not in the actives set
-                let runtime = var_node.runtime.as_ref().unwrap();
 
-                time += runtime.call_time;
+                // let runtime = var_node.runtime.as_ref().unwrap();
+                //
+                // time += runtime.call_time;
 
                 if let Some(ref operation) = var_node.origin {
+                    let di = operation.debug_info();
+
+                    time += di.comp_time;
+
                     for v in operation.input() {
                         if !v.is_evaluated() {
                             stack.push(v)
@@ -67,7 +72,7 @@ impl VarNode {
             time
         } else {
             // no parent -> cannot be recomputed
-            Duration::MAX
+            100000000
         }
     }
 

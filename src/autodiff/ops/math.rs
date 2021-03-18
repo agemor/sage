@@ -1,5 +1,5 @@
 use crate::autodiff::ops::core::scalar_mul;
-use crate::autodiff::ops::{Operator, DebugInfo};
+use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::Var;
 use crate::tensor::Tensor;
 
@@ -17,8 +17,8 @@ impl Operator<1> for Recip {
         x.recip()
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Recip", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Recip", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -43,8 +43,8 @@ impl Operator<1> for Sqrt {
         x.sqrt()
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sqrt", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sqrt", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -69,8 +69,8 @@ impl Operator<1> for Pow {
         x.pow(self.n)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Pow", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Pow", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

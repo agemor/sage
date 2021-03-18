@@ -31,6 +31,16 @@ impl DenseNetConfig {
     pub fn d169() -> Self {
         DenseNetConfig {
             depth: 169,
+            growth_rate: 24,
+            batch_norm_eps: 0.0001,
+            dropout_prob: 0.2,
+            num_classes: 10,
+        }
+    }
+
+    pub fn d201() -> Self {
+        DenseNetConfig {
+            depth: 201,
             growth_rate: 12,
             batch_norm_eps: 0.0001,
             dropout_prob: 0.2,
@@ -66,7 +76,7 @@ impl DenseNet {
 
         model.add(box BatchNorm2d::new(in_planes, config.batch_norm_eps));
         model.add(box Relu);
-       // model.add(box AvgPool2d::new(8));
+        // model.add(box AvgPool2d::new(8));
 
         DenseNet {
             model,

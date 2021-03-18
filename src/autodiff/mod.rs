@@ -32,12 +32,12 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
         iterations += 1;
 
         if iterations % 1000 == 0 {
-            println!(
-                "[{}] queue size: {}, elapsed time: {} sec",
-                iterations,
-                queue.len(),
-                start_time.elapsed().as_millis() as f32 / 1000.0
-            );
+            // println!(
+            //     "[{}] queue size: {}, elapsed time: {} sec",
+            //     iterations,
+            //     queue.len(),
+            //     start_time.elapsed().as_millis() as f32 / 1000.0
+            // );
         }
 
         // must unwrap
@@ -63,7 +63,7 @@ pub fn diff(y: &Var, xs: &[&Var]) -> HashMap<Var, Var> {
         }
     }
 
-    println!("[{}] backward pass generated. ", { iterations });
+    //println!("[{}] backward pass generated. ", { iterations });
 
     // aggregate outputs... unused gradients are dropped.
     grads.retain(|ref v, _| xs.contains(v));

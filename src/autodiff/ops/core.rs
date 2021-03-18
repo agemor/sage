@@ -1,4 +1,4 @@
-use crate::autodiff::ops::{DebugInfo, Operator};
+use crate::autodiff::ops::{elemwise_comp_time, pairwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::shape::{Shape, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
@@ -115,8 +115,8 @@ impl Operator<2> for Add {
         x0 + x1
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Add", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Add", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -146,8 +146,8 @@ impl Operator<2> for Sub {
         x0 - x1
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sub", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sub", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -175,8 +175,8 @@ impl Operator<1> for Neg {
         -x
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Neg", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Neg", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -198,16 +198,17 @@ impl Operator<2> for Mul {
         x0 * x1
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Mul", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Mul", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
-        let x0:&Var = x[0];
+        let x0: &Var = x[0];
         let x1 = x[1];
 
         if let Err(_) = Shape::union(x0.shape(), x1.shape()) {
-            println!("{}, {}", x0.debug_info().unwrap(), x1.debug_info().unwrap());
+            //println!("{}, {}", x0.debug_info().unwrap(), x1.debug_info().unwrap());
+            println!("{}, {}", x0.shape(), x1.shape());
         }
 
         let shape = Shape::union(x0.shape(), x1.shape()).unwrap();
@@ -236,8 +237,8 @@ impl Operator<2> for Div {
         x0 / x1
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Div", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new("Div", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -269,8 +270,8 @@ impl Operator<1> for ScalarAdd {
         x + self.scalar
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarAdd", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarAdd", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -290,8 +291,8 @@ impl Operator<1> for ScalarSub {
         x - self.scalar
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarSub", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarSub", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -311,8 +312,8 @@ impl Operator<1> for ScalarMul {
         x * self.scalar
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarMul", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarMul", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -332,8 +333,8 @@ impl Operator<1> for ScalarDiv {
         x / self.scalar
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarDiv", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("ScalarDiv", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -353,8 +354,12 @@ impl Operator<1> for Sum {
         x.sum_axis(self.axis, self.retain_axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sum", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new(
+            "Sum",
+            y.shape().size(),
+            elemwise_comp_time(x[0].shape()[self.axis] as f32, x[0]),
+        )
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -412,8 +417,14 @@ impl Operator<1> for SumTo {
         y
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("SumTo", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        let c = x[0].shape().size() / self.shape.size();
+
+        DebugInfo::new(
+            "SumTo",
+            y.shape().size(),
+            elemwise_comp_time(c as f32, x[0]),
+        )
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -442,7 +453,7 @@ impl Operator<1> for BroadcastTo {
     }
 
     fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
-        DebugInfo::new("BroadcastTo", x[0].shape().size())
+        DebugInfo::new("BroadcastTo", x[0].shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -472,7 +483,7 @@ impl Operator<1> for Reshape {
     }
 
     fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
-        DebugInfo::new("Reshape", x[0].shape().size())
+        DebugInfo::new("Reshape", x[0].shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -501,7 +512,7 @@ impl Operator<1> for Permute {
     }
 
     fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
-        DebugInfo::new("Permute", x[0].shape().size())
+        DebugInfo::new("Permute", x[0].shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -536,7 +547,7 @@ impl Operator<1> for SelectIndex {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("SelectIndex", y.shape().size())
+        DebugInfo::new("SelectIndex", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -562,7 +573,7 @@ impl Operator<1> for UnselectIndex {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("UnselectIndex", y.shape().size())
+        DebugInfo::new("UnselectIndex", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -591,7 +602,7 @@ impl Operator<1> for SelectSlice {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("SelectSlice", y.shape().size())
+        DebugInfo::new("SelectSlice", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -619,7 +630,7 @@ impl Operator<1> for UnselectSlice {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("UnselectSlice", y.shape().size())
+        DebugInfo::new("UnselectSlice", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -645,7 +656,7 @@ impl Operator<1> for SelectMultiIndex {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("SelectMultiIndex", y.shape().size())
+        DebugInfo::new("SelectMultiIndex", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -671,7 +682,7 @@ impl Operator<1> for UnselectMultiIndex {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("UnselectMultiIndex", y.shape().size())
+        DebugInfo::new("UnselectMultiIndex", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -699,8 +710,12 @@ impl Operator<2> for Concat {
         Tensor::cat(&[x0, x1], self.axis).unwrap()
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Concat", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new(
+            "Concat",
+            y.shape().size(),
+            pairwise_comp_time(0.3, x[0], x[1]),
+        )
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -743,8 +758,12 @@ impl Operator<2> for Stack {
         Tensor::stack(&[x0, x1], self.axis).unwrap()
     }
 
-    fn debug_info(&self, _x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Stack", y.shape().size())
+    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
+        DebugInfo::new(
+            "Stack",
+            y.shape().size(),
+            pairwise_comp_time(0.3, x[0], x[1]),
+        )
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -780,7 +799,7 @@ impl Operator<1> for Expand {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Expand", y.shape().size())
+        DebugInfo::new("Expand", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -804,7 +823,7 @@ impl Operator<1> for Squeeze {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Squeeze", y.shape().size())
+        DebugInfo::new("Squeeze", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -1004,7 +1023,7 @@ impl Var {
         let axis = axis.to_index(self.rank());
 
         UnselectSlice {
-            index: index.to_index(self.shape()[axis]),
+            index: index.to_index(size),
             slice_size,
             size,
             axis,

@@ -1,4 +1,4 @@
-use crate::autodiff::ops::{Operator, DebugInfo};
+use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::Var;
 use crate::tensor::shape::ToIndex;
 use crate::tensor::Tensor;
@@ -15,8 +15,8 @@ impl Operator<1> for Softmax {
         x.softmax(self.axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Softmax", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Softmax", y.shape().size(), elemwise_comp_time(3.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

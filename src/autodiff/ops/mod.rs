@@ -1,5 +1,5 @@
 pub mod activations;
-mod conv;
+pub mod conv;
 pub mod core;
 pub mod linalg;
 pub mod loss;
@@ -14,13 +14,27 @@ use crate::tensor::Tensor;
 use std::fmt;
 use std::ops::Deref;
 
+pub fn elemwise_comp_time(c: f32, x: &Var) -> usize {
+    let s = x.shape().size() as f32;
+    (s * c) as usize
+}
+
+pub fn pairwise_comp_time(c: f32, x0: &Var, x1: &Var) -> usize {
+    let s = std::cmp::max(x0.shape().size(), x1.shape().size()) as f32;
+    (s * c) as usize
+}
+
 pub trait Operator<const N: usize> {
     fn compute(&self, x: [&Tensor; N]) -> Tensor;
 
     fn forward(self, x: [&Var; N]) -> Var;
 
     fn debug_info(&self, x: [&Var; N], y: &Var) -> DebugInfo {
-        DebugInfo::new("undefined", y.shape().size())
+        DebugInfo::new(
+            "undefined",
+            y.shape().size(),
+            pairwise_comp_time(1.0, x[0], x[1]),
+        )
     }
 
     // forward-dependent backward pass. Mostly no
@@ -148,13 +162,15 @@ impl OperationEnum {
 pub struct DebugInfo {
     desc: String,
     mem_size: usize,
+    pub(crate) comp_time: usize,
 }
 
 impl DebugInfo {
-    pub fn new(s: &str, mem_size: usize) -> Self {
+    pub fn new(s: &str, mem_size: usize, comp_time: usize) -> Self {
         DebugInfo {
             desc: String::from(s),
             mem_size,
+            comp_time,
         }
     }
 }
@@ -163,9 +179,10 @@ impl fmt::Display for DebugInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "name: {}, mem req: {} MB",
+            "desc: {}, mem req: {} MB, comp time: {} millis",
             self.desc,
-            f32_to_mibs(self.mem_size * 4)
+            f32_to_mibs(self.mem_size * 4),
+            self.comp_time
         )
     }
 }

@@ -141,7 +141,8 @@ impl Session {
                 .iter()
                 .filter(|v| !must_keep.contains(v))
                 .min_by_key(|v| {
-                    v.node().recompute_heuristic().unwrap() // must unwrap
+                    (v.node().recompute_heuristic().unwrap() * 100000.0) as usize
+                    // must unwrap
                 })
                 .cloned();
 

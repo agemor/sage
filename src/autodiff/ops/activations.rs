@@ -1,12 +1,64 @@
-use crate::autodiff::ops::{DebugInfo, Operator};
-use crate::autodiff::var::Var;
+use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
+use crate::autodiff::var::{ToVar, Var};
 use crate::tensor::Tensor;
 
 // activations
 struct Relu;
 
+struct LeakyRelu {
+    alpha: f32,
+}
+
+struct Sigmoid;
+
+struct Tanh;
+
 struct Binarize {
     threshold: f32,
+}
+
+impl Operator<1> for Sigmoid {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        let x = x[0];
+        x.map(|&x| if x > 0.0 { x } else { 0.0 })
+    }
+
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Sigmoid", y.shape().size(), elemwise_comp_time(1.5, x[0]))
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let x = x[0];
+        let gx = gy * binarize(x, 0.0);
+        [gx]
+    }
+}
+
+impl Operator<1> for Tanh {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        let x = x[0];
+        x.map(|&x| if x > 0.0 { x } else { 0.0 })
+    }
+
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Tanh", y.shape().size(), elemwise_comp_time(1.5, x[0]))
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let x = x[0];
+        let gx = gy * binarize(x, 0.0);
+        [gx]
+    }
 }
 
 impl Operator<1> for Relu {
@@ -15,8 +67,30 @@ impl Operator<1> for Relu {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Relu", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Relu", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    }
+
+    fn forward(self, x: [&Var; 1]) -> Var {
+        let x = x[0];
+        Var::from_unary_op(x.shape(), self, x)
+    }
+
+    fn backward(&self, x: [&Var; 1], gy: &Var) -> [Var; 1] {
+        let x = x[0];
+        let gx = gy * binarize(x, 0.0);
+        [gx]
+    }
+}
+
+impl Operator<1> for LeakyRelu {
+    fn compute(&self, x: [&Tensor; 1]) -> Tensor {
+        let x = x[0];
+        x.map(|&x| if x > 0.0 { x } else { 0.0 })
+    }
+
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Relu", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -38,8 +112,8 @@ impl Operator<1> for Binarize {
         x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Binarize", y.shape().size())
+    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
+        DebugInfo::new("Binarize", y.shape().size(), elemwise_comp_time(1.0, x[0]))
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -52,8 +126,32 @@ impl Operator<1> for Binarize {
     }
 }
 
-pub fn relu(x: &Var) -> Var {
-    Relu.forward([x])
+pub fn relu<V>(x: V) -> Var
+where
+    V: ToVar,
+{
+    Relu.forward([&x.to_var()])
+}
+
+pub fn leaky_relu<V>(x: V, alpha: f32) -> Var
+where
+    V: ToVar,
+{
+    LeakyRelu { alpha }.forward([&x.to_var()])
+}
+
+pub fn sigmoid<V>(x: V) -> Var
+where
+    V: ToVar,
+{
+    Sigmoid.forward([&x.to_var()])
+}
+
+pub fn tanh<V>(x: V) -> Var
+where
+    V: ToVar,
+{
+    Tanh.forward([&x.to_var()])
 }
 
 pub fn binarize(x: &Var, threshold: f32) -> Var {

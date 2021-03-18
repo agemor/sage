@@ -30,9 +30,18 @@ impl Operator<2> for MatmulGrad1 {
         let x0 = x[0];
         let x1 = x[1];
 
-        println!("{}, {}", x0.shape(), x1.shape());
+        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
+        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
+        //let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
 
-        DebugInfo::new("MatmulGrad1", y.shape().size())
+        // shape broadcast
+        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
+
+        let m = x0.shape()[x0.rank() - 2];
+        let n = x0.shape()[x0.rank() - 1];
+        let p = x1.shape()[x1.rank() - 1];
+
+        DebugInfo::new("MatmulGrad1", y.shape().size(), batch.size() * m * n * p)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -71,9 +80,17 @@ impl Operator<2> for MatmulGrad2 {
         let x0 = x[0];
         let x1 = x[1];
 
-        println!("{}, {}", x0.shape(), x1.shape());
+        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
+        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
+        //let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
 
-        DebugInfo::new("MatmulGrad2", y.shape().size())
+        // shape broadcast
+        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
+
+        let m = x0.shape()[x0.rank() - 2];
+        let n = x0.shape()[x0.rank() - 1];
+        let p = x1.shape()[x1.rank() - 1];
+        DebugInfo::new("MatmulGrad2", y.shape().size(), batch.size() * m * n * p)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -115,9 +132,19 @@ impl Operator<2> for Matmul {
         let x0 = x[0];
         let x1 = x[1];
 
-        println!("{}, {}", x0.shape(), x1.shape());
+        //println!("{}, {}", x0.shape(), x1.shape());
 
-        DebugInfo::new("Matmul", y.shape().size())
+        let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
+        let (x1_batch, _) = x1.shape().split(x1.rank() - 2);
+
+        // shape broadcast
+        let mut batch = Shape::union(x0_batch, x1_batch).unwrap();
+
+        let m = x0.shape()[x0.rank() - 2];
+        let n = x0.shape()[x0.rank() - 1];
+        let p = x1.shape()[x1.rank() - 1];
+
+        DebugInfo::new("Matmul", y.shape().size(), batch.size() * m * n * p)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -184,7 +211,9 @@ impl Operator<2> for Matvec {
         let x1 = x[1];
         println!("{}, {}", x0.shape(), x1.shape());
 
-        DebugInfo::new("Matvec", y.shape().size())
+        unimplemented!();
+
+        DebugInfo::new("Matvec", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -268,7 +297,7 @@ impl Operator<1> for Transpose {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Transpose", y.shape().size())
+        DebugInfo::new("Transpose", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

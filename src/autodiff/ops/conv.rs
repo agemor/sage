@@ -25,7 +25,7 @@ pub struct Col2Im {
     dilation: usize,
 }
 
-fn get_conv_size(
+pub fn get_conv_size(
     input_size: usize,
     kernel_size: usize,
     stride: usize,
@@ -35,7 +35,7 @@ fn get_conv_size(
     (input_size + 2 * padding - dilation * (kernel_size - 1) - 1 + stride - 1) / stride + 1
 }
 
-fn get_deconv_size(
+pub fn get_deconv_size(
     input_size: usize,
     kernel_size: usize,
     stride: usize,
@@ -115,7 +115,11 @@ impl Operator<1> for Im2Col {
     }
 
     fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Im2Col", y.shape().size())
+        DebugInfo::new(
+            "Im2Col",
+            y.shape().size(),
+            self.kernel_size * self.kernel_size * 219,
+        )
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -184,16 +188,20 @@ impl Operator<1> for Col2Im {
     }
 
     fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        println!(
-            "{}, {}, {}, {}, {}",
-            self.kernel_size,
-            self.stride,
-            self.padding,
-            self.dilation,
-            x[0].shape()
-        );
+        // println!(
+        //     "{}, {}, {}, {}, {}",
+        //     self.kernel_size,
+        //     self.stride,
+        //     self.padding,
+        //     self.dilation,
+        //     x[0].shape()
+        // );
 
-        DebugInfo::new("Col2Im", y.shape().size())
+        DebugInfo::new(
+            "Col2Im",
+            y.shape().size(),
+            self.kernel_size * self.kernel_size * 219,
+        )
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
