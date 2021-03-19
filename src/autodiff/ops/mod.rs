@@ -30,13 +30,15 @@ pub trait Operator<const N: usize> {
 
     fn forward(self, x: [&Var; N]) -> Var;
 
-    fn debug_info(&self, x: [&Var; N], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; N], y: &Var, profiler: &Profiler) -> DebugInfo {
         DebugInfo::new(
             "undefined",
             y.shape().size(),
             pairwise_comp_time(1.0, x[0], x[1]),
         )
     }
+
+    fn add_bench(&self, x: [&Var; N], profiler: &mut Profiler) {}
 
     // forward-dependent backward pass. Mostly no
     fn is_fdb(&self) -> bool {
@@ -83,12 +85,16 @@ impl<const N: usize> Operation<{ N }> {
         self.operator.compute(data_borrowed)
     }
 
-    pub fn debug_info(&self, profiler: &mut Profiler) -> DebugInfo {
+    pub fn debug_info(&self, profiler: &Profiler) -> DebugInfo {
         self.operator.debug_info(
             self.input.each_ref(),
             &self.output.to_var().unwrap(),
             profiler,
         )
+    }
+
+    pub fn add_bench(&self, profiler: &mut Profiler) {
+        self.operator.add_bench(self.input.each_ref(), profiler);
     }
 
     pub fn input(&self) -> [Var; N] {
@@ -141,10 +147,17 @@ impl OperationEnum {
         }
     }
 
-    pub fn debug_info(&self, profiler: &mut Profiler) -> DebugInfo {
+    pub fn debug_info(&self, profiler: &Profiler) -> DebugInfo {
         match self {
             Self::Unary(o) => o.debug_info(profiler),
             Self::Binary(o) => o.debug_info(profiler),
+        }
+    }
+
+    pub fn add_bench(&self, profiler: &mut Profiler) {
+        match self {
+            Self::Unary(o) => o.add_bench(profiler),
+            Self::Binary(o) => o.add_bench(profiler),
         }
     }
 

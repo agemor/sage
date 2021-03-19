@@ -27,7 +27,7 @@ impl VarNode {
         }
     }
 
-    pub fn recompute_heuristic(&self, profiler: &mut Profiler) -> Option<f64> {
+    pub fn recompute_heuristic(&self, profiler: &Profiler) -> Option<f64> {
         if let Some(ref runtime) = self.runtime {
             let time = self.recompute_time(profiler) as f64;
             let space = runtime.mem_store as f64;
@@ -38,7 +38,7 @@ impl VarNode {
     }
 
     // get re-computation cost, in a dynamic-programming fashion.
-    fn recompute_time(&self, profiler: &mut Profiler) -> usize {
+    fn recompute_time(&self, profiler: &Profiler) -> usize {
         if let Some(ref operation) = self.origin {
             let mut time = 0;
             let mut stack = Vec::<Var>::new();
@@ -261,7 +261,7 @@ impl Var {
         self.node_mut().data = Some(data);
     }
 
-    pub fn debug_info(&self, profiler: &mut Profiler) -> Option<DebugInfo> {
+    pub fn debug_info(&self, profiler: &Profiler) -> Option<DebugInfo> {
         let node = self.node();
 
         if let Some(op) = &node.origin {

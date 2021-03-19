@@ -8,6 +8,7 @@
 #![feature(array_methods)]
 #![feature(drain_filter)]
 #![feature(array_map)]
+#![feature(in_band_lifetimes)]
 
 #[macro_use]
 extern crate impl_ops;

@@ -1,4 +1,4 @@
-use crate::autodiff::ops::core::benchmark_elemwise_map;
+use crate::autodiff::ops::core::{add_bench_elemwise_map, comp_cost_elemwise};
 use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
 use crate::profile::{torch_var, Profiler};
@@ -35,9 +35,13 @@ impl Operator<1> for Sigmoid {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("Sigmoid", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -57,9 +61,13 @@ impl Operator<1> for Tanh {
         let x = x[0];
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("Tanh", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -80,9 +88,13 @@ impl Operator<1> for Relu {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("Relu", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -103,9 +115,13 @@ impl Operator<1> for LeakyRelu {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("LeakyRelu", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -127,9 +143,13 @@ impl Operator<1> for Binarize {
         x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("Binarize", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

@@ -27,9 +27,7 @@ impl Operator<2> for MatmulGrad1 {
         unimplemented!()
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let x0 = x[0];
-        let x1 = x[1];
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
 
         let uid = format!("matmul_grad1_{}", x[0].shape().to_id());
 
@@ -37,30 +35,6 @@ impl Operator<2> for MatmulGrad1 {
 
         if let Some(t) = profiler.comp_time(&uid) {
             comp_time = t;
-        } else {
-            let v1 = format!("{}1", uid);
-            let v2 = format!("{}2", uid);
-
-            profiler.add_benchmark(
-                &uid,
-                {
-                    // prep code
-                    format!(
-                        "{}{}",
-                        torch_var(&v1, x0.shape()),
-                        torch_var(&v2, x1.shape())
-                    )
-                },
-                {
-                    // exec code
-                    format!(
-                        "torch.sum(torch.matmul({}, torch.transpose({}, -1, -2)), dim=({})",
-                        v1,
-                        v2,
-                        self.target.to_string2()
-                    )
-                },
-            );
         }
 
         //println!("{}, {}", x0.shape(), x1.shape());
@@ -77,6 +51,34 @@ impl Operator<2> for MatmulGrad1 {
 
         DebugInfo::new("MatmulGrad1", y.shape().size(), comp_time)
     }
+
+    fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
+        let uid = format!("matmul_grad1_{}", x[0].shape().to_id());
+
+        let v1 = format!("{}1", uid);
+        let v2 = format!("{}2", uid);
+
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                format!(
+                    "{}{}",
+                    torch_var(&v1, x[0].shape()),
+                    torch_var(&v2, x[1].shape())
+                )
+            },
+            {
+                // exec code
+                format!(
+                    "torch.matmul({}[0, :], torch.transpose({}[0, :], -1, -2))",
+                    v1,
+                    v2
+                )
+            },
+        );
+    }
+
 
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
@@ -110,41 +112,13 @@ impl Operator<2> for MatmulGrad2 {
         unimplemented!()
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let x0 = x[0];
-        let x1 = x[1];
-
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
         let uid = format!("matmul_grad2_{}", x[0].shape().to_id());
 
         let mut comp_time = 1;
 
         if let Some(t) = profiler.comp_time(&uid) {
             comp_time = t;
-        } else {
-            let v1 = format!("{}1", uid);
-            let v2 = format!("{}2", uid);
-
-            profiler.add_benchmark(
-                &uid,
-                {
-                    // prep code
-                    format!(
-                        "{}{}",
-                        torch_var(&v1, x0.shape()),
-                        torch_var(&v2, x1.shape())
-                    )
-                },
-                {
-                    // exec code
-                    //         //let gx1 = x0.transpose(-1, -2).matmul(gy).sum_to(x1.shape());
-                    format!(
-                        "torch.sum(torch.matmul(torch.transpose({}, -1, -2), {})), dim=({})",
-                        v1,
-                        v2,
-                        self.target.to_string2()
-                    )
-                },
-            );
         }
 
         //println!("{}, {}", x0.shape(), x1.shape());
@@ -160,6 +134,34 @@ impl Operator<2> for MatmulGrad2 {
         // let p = x1.shape()[x1.rank() - 1];
 
         DebugInfo::new("MatmulGrad2", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
+        let uid = format!("matmul_grad2_{}", x[0].shape().to_id());
+
+        let v1 = format!("{}1", uid);
+        let v2 = format!("{}2", uid);
+
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                format!(
+                    "{}{}",
+                    torch_var(&v1, x[0].shape()),
+                    torch_var(&v2, x[1].shape())
+                )
+            },
+            {
+                // exec code
+                //         //let gx1 = x0.transpose(-1, -2).matmul(gy).sum_to(x1.shape());
+                format!(
+                    "torch.matmul(torch.transpose({}, -1, -2), {}[0, :])",
+                    v1,
+                    v2
+                )
+            },
+        );
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -197,37 +199,14 @@ impl Operator<2> for Matmul {
         x0.matmul(x1)
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let x0 = x[0];
-        let x1 = x[1];
-
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
         let uid = format!("matmul_{}", x[0].shape().to_id());
 
         let mut comp_time = 1;
 
         if let Some(t) = profiler.comp_time(&uid) {
             comp_time = t;
-        } else {
-            let v1 = format!("{}1", uid);
-            let v2 = format!("{}2", uid);
-
-            profiler.add_benchmark(
-                &uid,
-                {
-                    // prep code
-                    format!(
-                        "{}{}",
-                        torch_var(&v1, x0.shape()),
-                        torch_var(&v2, x1.shape())
-                    )
-                },
-                {
-                    // exec code
-                    format!("torch.matmul({}, {})", v1, v2)
-                },
-            );
         }
-
         //println!("{}, {}", x0.shape(), x1.shape());
         //
         // let (x0_batch, _) = x0.shape().split(x0.rank() - 2);
@@ -241,6 +220,29 @@ impl Operator<2> for Matmul {
         // let p = x1.shape()[x1.rank() - 1];
 
         DebugInfo::new("Matmul", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
+        let uid = format!("matmul_{}", x[0].shape().to_id());
+
+        let v1 = format!("{}1", uid);
+        let v2 = format!("{}2", uid);
+
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                format!(
+                    "{}{}",
+                    torch_var(&v1, x[0].shape()),
+                    torch_var(&v2, x[1].shape())
+                )
+            },
+            {
+                // exec code
+                format!("torch.matmul({}, {})", v1, v2)
+            },
+        );
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -283,6 +285,9 @@ impl Operator<2> for Matmul {
         // gy: (*, A, C)
 
         // (*, A, B) = (*, A, C) (*, C, B)
+
+        // (*, A, B) = (*, A, C) * (*, )
+
         //let gx0 = gy.matmul(x1.transpose(-1, -2)).sum_to(x0.shape());
         let gx0 = MatmulGrad1 { target: x0.shape() }.forward([gy, x1]);
 
@@ -302,7 +307,7 @@ impl Operator<2> for Matvec {
         x0.matvec(x1)
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
         let x0 = x[0];
         let x1 = x[1];
         println!("{}, {}", x0.shape(), x1.shape());
@@ -392,7 +397,7 @@ impl Operator<1> for Transpose {
         x.transpose(self.axis_a, self.axis_b)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
         DebugInfo::new("Transpose", y.shape().size(), 1)
     }
 

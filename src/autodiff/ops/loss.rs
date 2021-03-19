@@ -17,7 +17,7 @@ impl Operator<2> for SoftmaxCrossEntropy {
         -log_p.sum_axis(1, false)
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
         DebugInfo::new("SoftmaxCrossEntropy", y.shape().size(), 1)
     }
 

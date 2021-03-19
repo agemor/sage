@@ -1,4 +1,4 @@
-use crate::autodiff::ops::core::benchmark_elemwise_map;
+use crate::autodiff::ops::core::{comp_cost_elemwise, add_bench_elemwise_map};
 use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::Var;
 use crate::profile::Profiler;
@@ -17,9 +17,13 @@ impl Operator<1> for Softmax {
         x.softmax(self.axis)
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
-        let comp_time = benchmark_elemwise_map(x[0], profiler);
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let comp_time = comp_cost_elemwise(x[0], profiler);
         DebugInfo::new("Softmax", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        add_bench_elemwise_map(x[0], profiler);
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

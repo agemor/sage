@@ -15,6 +15,9 @@ use crate::layers::normalization::LayerNorm;
 use crate::layers::{Parameter, Stackable};
 use crate::tensor::Tensor;
 use itertools::Itertools;
+use crate::profile::{Profiler, test_profile};
+use std::fs::File;
+use std::io::Write;
 
 // input mock
 
@@ -184,8 +187,10 @@ pub fn exp1_memory_profile() {
     //     println!("[model {}] min peak  : {}", model_name, f32_to_mibs(budget));
     // }
 
+    let mut profiler = test_profile();
+
     let batches = [1, 2, 4, 8, 16];
-    let budgets = [2000, 3000, 4000, 5000, 6000, 7000, 8000];
+    let budgets = [4000];
 
     for &batch in batches.iter() {
         for &budget in budgets.iter() {
@@ -194,17 +199,20 @@ pub fn exp1_memory_profile() {
             }
 
             let bert = mock_bert(batch);
-            let mut sim = Sim::with_budget(bert.1.clone(), mibs_to_f32(budget), 1800000);
+            let mut sim = Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1800000);
             sim.start();
             sim.clear_mem();
             println!(
                 "({}, {}): {}",
                 batch,
                 budget,
-                (sim.total_iter as f32).sqrt()
+                sim
             );
         }
     }
+
+    let mut file = File::create("torch_bench.py").unwrap();
+    file.write_all(profiler.gen_benchmark(2).as_ref());
 
     // return;
     //

@@ -115,7 +115,7 @@ impl Operator<1> for Im2Col {
         unimplemented!()
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
         let uid = format!(
             "im2col_{}_{}_{}_{}",
             x[0].shape().to_id(),
@@ -128,26 +128,36 @@ impl Operator<1> for Im2Col {
 
         if let Some(t) = profiler.comp_time(&uid) {
             comp_time = t;
-        } else {
-            let v1 = &uid;
-
-            profiler.add_benchmark(
-                &uid,
-                {
-                    // prep code
-                    torch_var(v1, x[0].shape())
-                },
-                {
-                    // exec code
-                    format!(
-                        "torch.nn.functional.unfold({}, {}, 1, {}, {})",
-                        v1, self.kernel_size, self.padding, self.stride
-                    )
-                },
-            );
         }
 
         DebugInfo::new("Im2col", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
+        let uid = format!(
+            "im2col_{}_{}_{}_{}",
+            x[0].shape().to_id(),
+            self.kernel_size,
+            self.stride,
+            self.padding
+        );
+
+        let v1 = &uid;
+
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                torch_var(v1, x[0].shape())
+            },
+            {
+                // exec code
+                format!(
+                    "torch.nn.functional.unfold({}, {}, 1, {}, {})",
+                    v1, self.kernel_size, self.padding, self.stride
+                )
+            },
+        );
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -215,7 +225,24 @@ impl Operator<1> for Col2Im {
         unimplemented!()
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &Profiler) -> DebugInfo {
+        let uid = format!(
+            "col2im_{}_{}_{}_{}",
+            x[0].shape().to_id(),
+            self.kernel_size,
+            self.stride,
+            self.padding
+        );
+        let mut comp_time = self.kernel_size * self.kernel_size * 219;
+
+        if let Some(t) = profiler.comp_time(&uid) {
+            comp_time = t;
+        }
+
+        DebugInfo::new("Col2im", y.shape().size(), comp_time)
+    }
+
+    fn add_bench(&self, x: [&Var; 1], profiler: &mut Profiler) {
         let uid = format!(
             "col2im_{}_{}_{}_{}",
             x[0].shape().to_id(),
@@ -224,32 +251,23 @@ impl Operator<1> for Col2Im {
             self.padding
         );
 
-        let mut comp_time = self.kernel_size * self.kernel_size * 219;
+        let v1 = &uid;
 
-        if let Some(t) = profiler.comp_time(&uid) {
-            comp_time = t;
-        } else {
-            let v1 = &uid;
-
-            profiler.add_benchmark(
-                &uid,
-                {
-                    // prep code
-                    let s = x[0].shape();
-
-                    torch_var(v1, [s[0], s[1] * s[2] * s[3], s[4], s[5]])
-                },
-                {
-                    // exec code
-                    format!(
-                        "torch.nn.functional.unfold({}, {}, 1, {}, {})",
-                        v1, self.kernel_size, self.padding, self.stride
-                    )
-                },
-            );
-        }
-
-        DebugInfo::new("Col2im", y.shape().size(), comp_time)
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                let s = x[0].shape();
+                torch_var(v1, [s[0], s[1] * s[2] * s[3], s[4], s[5]])
+            },
+            {
+                // exec code
+                format!(
+                    "torch.nn.functional.unfold({}, {}, 1, {}, {})",
+                    v1, self.kernel_size, self.padding, self.stride
+                )
+            },
+        );
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use std::{cmp, fmt};
 
 // Variable evaluation session
-pub struct Sim {
+pub struct Sim<'a> {
     pub mem_budget: usize,
     pub mem_used: usize,
     pub peak_mem_used: usize,
@@ -22,6 +22,7 @@ pub struct Sim {
     pub model_mem: usize,
     pub total_iter: usize,
     pub elapsed_time: f32,
+    pub comp_time: usize,
 
     pub targets: Vec<Var>,
     pub iter_threshold: usize,
@@ -30,19 +31,20 @@ pub struct Sim {
 
     pub resolved: HashSet<Var>,
 
-    pub profiler: Profiler,
+    pub profiler: &'a mut Profiler,
 }
 
-impl fmt::Display for Sim {
+impl<'a> fmt::Display for Sim<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "mem_budget: {}, model_mem: {} MB, peak_mem: {} MB, total_iter: {}, elapsed_time: {} sec",
+            "mem_budget: {}, model_mem: {} MB, peak_mem: {} MB, total_iter: {}, elapsed_time: {} sec, comp_time: {}",
             f32_to_mibs(self.mem_budget),
             f32_to_mibs(self.model_mem),
             f32_to_mibs(self.peak_mem_used),
             self.total_iter,
-            self.elapsed_time
+            self.elapsed_time,
+            self.comp_time
         )
     }
 }
@@ -55,8 +57,8 @@ impl fmt::Display for Sim {
 /// (batch, input size)
 /// polynomial regression
 
-impl Sim {
-    pub fn new(targets: Vec<Var>) -> Self {
+impl<'a> Sim<'a> {
+    pub fn new(profiler: &'a mut Profiler, targets: Vec<Var>) -> Self {
         Sim {
             mem_budget: 0,
             mem_used: 0,
@@ -64,15 +66,21 @@ impl Sim {
             elapsed_time: 0.0,
             model_mem: 0,
             total_iter: 0,
+            comp_time: 0,
             targets,
             iter_threshold: 0,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
-            profiler: Profiler::new(),
+            profiler,
         }
     }
 
-    pub fn with_budget(targets: Vec<Var>, mem_budget: usize, iter_threshold: usize) -> Self {
+    pub fn with_budget(
+        profiler: &'a mut Profiler,
+        targets: Vec<Var>,
+        mem_budget: usize,
+        iter_threshold: usize,
+    ) -> Self {
         Sim {
             mem_budget,
             mem_used: 0,
@@ -80,11 +88,12 @@ impl Sim {
             elapsed_time: 0.0,
             model_mem: 0,
             total_iter: 0,
+            comp_time: 0,
             targets,
             iter_threshold,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
-            profiler: Profiler::new(),
+            profiler,
         }
     }
 
@@ -305,7 +314,9 @@ impl Sim {
                     }
 
                     if self.resolved.insert(var.clone()) {
-                        comp_time += op.debug_info(&mut self.profiler).comp_time;
+                        op.add_bench(&mut self.profiler);
+
+                        comp_time += op.debug_info(&self.profiler).comp_time;
 
                         self.alloc_mem(mem_size);
                     }
@@ -395,7 +406,7 @@ impl Sim {
         // println!("   - peak mem: {} MB", f32_to_mibs(self.peak_mem_used));
         //
         // println!("   - comp time: {} millis", comp_time / 1024 / 1024 / 1024);
-
+        self.comp_time = comp_time;
         self.total_iter = iterations;
         self.elapsed_time = start_time.elapsed().as_millis() as f32 / 1000.0;
 
@@ -435,7 +446,7 @@ impl Sim {
                 .filter(|v| !self.global_lock.contains(v) && !v.is_leaf())
                 //.max_by_key(|v| v.shape().size())
                 .min_by_key(|v| {
-                    (v.node().recompute_heuristic(&mut self.profiler).unwrap() * 100000.0) as usize
+                    (v.node().recompute_heuristic(&self.profiler).unwrap() * 100000.0) as usize
                 })
                 .cloned();
 
@@ -448,7 +459,7 @@ impl Sim {
                 //println!("freed node : {}", var.debug_info().unwrap());
 
                 if self.resolved.remove(&var) {
-                    recomp_time += var.debug_info(&).unwrap().comp_time;
+                    recomp_time += var.debug_info(&self.profiler).unwrap().comp_time;
 
                     let mut var_node = var.node_mut();
 
