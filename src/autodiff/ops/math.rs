@@ -1,6 +1,7 @@
-use crate::autodiff::ops::core::scalar_mul;
+use crate::autodiff::ops::core::{benchmark_elemwise_map, scalar_mul};
 use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::Var;
+use crate::profile::Profiler;
 use crate::tensor::Tensor;
 
 struct Recip;
@@ -17,8 +18,9 @@ impl Operator<1> for Recip {
         x.recip()
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Recip", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Recip", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -43,8 +45,9 @@ impl Operator<1> for Sqrt {
         x.sqrt()
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sqrt", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Sqrt", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -69,8 +72,9 @@ impl Operator<1> for Pow {
         x.pow(self.n)
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Pow", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Pow", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

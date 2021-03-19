@@ -1,5 +1,6 @@
 use crate::autodiff::var::RuntimeProfile;
 use crate::autodiff::Var;
+use crate::profile::Profiler;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -10,6 +11,7 @@ pub struct Session {
     targets: Vec<Var>,
 
     resolved: HashSet<Var>,
+    profiler: Profiler,
 }
 
 impl Session {
@@ -18,6 +20,7 @@ impl Session {
             mem_budget,
             targets,
             resolved: HashSet::new(),
+            profiler: Profiler::new(),
         }
     }
 
@@ -140,10 +143,11 @@ impl Session {
                 .resolved
                 .iter()
                 .filter(|v| !must_keep.contains(v))
-                .min_by_key(|v| {
-                    (v.node().recompute_heuristic().unwrap() * 100000.0) as usize
-                    // must unwrap
-                })
+                .max_by_key(|v| v.shape().size())
+                // .min_by_key(|v| {
+                //     (v.node().recompute_heuristic(self.profiler).unwrap() * 100000.0) as usize
+                //     // must unwrap
+                // })
                 .cloned();
 
             if let Some(var) = min_heuristic_var {

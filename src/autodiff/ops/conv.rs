@@ -1,5 +1,6 @@
 use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::Var;
+use crate::profile::{torch_var, Profiler};
 use crate::tensor::shape::Shape;
 use crate::tensor::Tensor;
 
@@ -114,12 +115,39 @@ impl Operator<1> for Im2Col {
         unimplemented!()
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new(
-            "Im2Col",
-            y.shape().size(),
-            self.kernel_size * self.kernel_size * 219,
-        )
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let uid = format!(
+            "im2col_{}_{}_{}_{}",
+            x[0].shape().to_id(),
+            self.kernel_size,
+            self.stride,
+            self.padding
+        );
+
+        let mut comp_time = self.kernel_size * self.kernel_size * 219;
+
+        if let Some(t) = profiler.comp_time(&uid) {
+            comp_time = t;
+        } else {
+            let v1 = &uid;
+
+            profiler.add_benchmark(
+                &uid,
+                {
+                    // prep code
+                    torch_var(v1, x[0].shape())
+                },
+                {
+                    // exec code
+                    format!(
+                        "torch.nn.functional.unfold({}, {}, 1, {}, {})",
+                        v1, self.kernel_size, self.padding, self.stride
+                    )
+                },
+            );
+        }
+
+        DebugInfo::new("Im2col", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -187,21 +215,41 @@ impl Operator<1> for Col2Im {
         unimplemented!()
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        // println!(
-        //     "{}, {}, {}, {}, {}",
-        //     self.kernel_size,
-        //     self.stride,
-        //     self.padding,
-        //     self.dilation,
-        //     x[0].shape()
-        // );
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let uid = format!(
+            "col2im_{}_{}_{}_{}",
+            x[0].shape().to_id(),
+            self.kernel_size,
+            self.stride,
+            self.padding
+        );
 
-        DebugInfo::new(
-            "Col2Im",
-            y.shape().size(),
-            self.kernel_size * self.kernel_size * 219,
-        )
+        let mut comp_time = self.kernel_size * self.kernel_size * 219;
+
+        if let Some(t) = profiler.comp_time(&uid) {
+            comp_time = t;
+        } else {
+            let v1 = &uid;
+
+            profiler.add_benchmark(
+                &uid,
+                {
+                    // prep code
+                    let s = x[0].shape();
+
+                    torch_var(v1, [s[0], s[1] * s[2] * s[3], s[4], s[5]])
+                },
+                {
+                    // exec code
+                    format!(
+                        "torch.nn.functional.unfold({}, {}, 1, {}, {})",
+                        v1, self.kernel_size, self.padding, self.stride
+                    )
+                },
+            );
+        }
+
+        DebugInfo::new("Col2im", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

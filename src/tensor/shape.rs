@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use num_traits::PrimInt;
 use std::fmt::Formatter;
 use std::ops::{Index, IndexMut};
@@ -244,6 +245,25 @@ impl Shape {
         }
         self.len += shape.len;
         self
+    }
+
+    pub fn to_id(&self) -> String {
+        let mut id = String::new();
+        self.sizes().iter().for_each(|i| {
+            id.push_str(&i.to_string());
+            id.push_str("_")
+        });
+        id
+    }
+
+    pub(crate) fn to_string2(&self) -> String {
+        let mut str = String::new();
+        self.sizes().iter().for_each(|i| {
+            str.push_str(&i.to_string());
+            str.push_str(", ")
+        });
+        str.pop();
+        str
     }
 }
 

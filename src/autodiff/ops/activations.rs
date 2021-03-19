@@ -1,5 +1,8 @@
+use crate::autodiff::ops::core::benchmark_elemwise_map;
 use crate::autodiff::ops::{elemwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
+use crate::profile::{torch_var, Profiler};
+use crate::tensor::shape::Shape;
 use crate::tensor::Tensor;
 
 // activations
@@ -17,14 +20,24 @@ struct Binarize {
     threshold: f32,
 }
 
+// trait TorchProfile {
+//
+//     fn uid(&self) -> String;
+//
+//     fn prep(&self, vars:Vec<Shape>) -> String ;
+//
+//     fn exec_code(&self, vars:Vec<Shape>) -> String;
+// }
+
 impl Operator<1> for Sigmoid {
     fn compute(&self, x: [&Tensor; 1]) -> Tensor {
         let x = x[0];
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sigmoid", y.shape().size(), elemwise_comp_time(1.5, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Sigmoid", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -44,9 +57,9 @@ impl Operator<1> for Tanh {
         let x = x[0];
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
-
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Tanh", y.shape().size(), elemwise_comp_time(1.5, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Tanh", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -67,8 +80,9 @@ impl Operator<1> for Relu {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Relu", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Relu", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -89,8 +103,9 @@ impl Operator<1> for LeakyRelu {
         x.map(|&x| if x > 0.0 { x } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Relu", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("LeakyRelu", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -112,8 +127,9 @@ impl Operator<1> for Binarize {
         x.map(|&x| if x > self.threshold { 1.0 } else { 0.0 })
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Binarize", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("Binarize", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {

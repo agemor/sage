@@ -29,6 +29,7 @@ mod example_models;
 mod layers;
 mod optim;
 mod paper_experiments;
+mod profile;
 mod tensor;
 
 fn main() {

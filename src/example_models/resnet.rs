@@ -15,6 +15,15 @@ pub struct ResNetConfig {
 }
 
 impl ResNetConfig {
+    pub fn d18() -> Self {
+        ResNetConfig {
+            eps: 0.0001,
+            num_classes: 10,
+            num_blocks: [2, 2, 2, 2],
+            expansion: 4,
+        }
+    }
+
     pub fn d50() -> Self {
         ResNetConfig {
             eps: 0.0001,

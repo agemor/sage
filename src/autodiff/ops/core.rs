@@ -1,5 +1,6 @@
 use crate::autodiff::ops::{elemwise_comp_time, pairwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
+use crate::profile::{torch_var, Profiler};
 use crate::tensor::shape::{Shape, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
 use std::{cmp, ops};
@@ -106,6 +107,61 @@ struct Squeeze {
 }
 
 // math operations
+pub fn benchmark_pairwise_map(x0: &Var, x1: &Var, profiler: &mut Profiler) -> usize {
+    let shape = Shape::union(x0.shape(), x1.shape()).unwrap();
+
+    let uid = format!("maps_{}", shape.to_id());
+
+    let mut comp_time = pairwise_comp_time(1.0, x0, x1);
+
+    if let Some(t) = profiler.comp_time(&uid) {
+        comp_time = t;
+    } else {
+        let v1 = format!("{}1", uid);
+        let v2 = format!("{}2", uid);
+
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                format!(
+                    "{}{}",
+                    torch_var(&v1, x0.shape()),
+                    torch_var(&v2, x1.shape())
+                )
+            },
+            {
+                // exec code
+                format!("{} + {}", v1, v2)
+            },
+        );
+    }
+    comp_time
+}
+
+pub fn benchmark_elemwise_map(x: &Var, profiler: &mut Profiler) -> usize {
+    let uid = format!("maps_{}", x.shape().to_id());
+
+    let mut comp_time = elemwise_comp_time(1.0, x);
+
+    if let Some(t) = profiler.comp_time(&uid) {
+        comp_time = t;
+    } else {
+        let v = &uid;
+        profiler.add_benchmark(
+            &uid,
+            {
+                // prep code
+                torch_var(v, x.shape())
+            },
+            {
+                // exec code
+                format!("torch.nn.functional.relu({})", v)
+            },
+        );
+    }
+    comp_time
+}
 
 impl Operator<2> for Add {
     fn compute(&self, x: [&Tensor; 2]) -> Tensor {
@@ -115,8 +171,9 @@ impl Operator<2> for Add {
         x0 + x1
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Add", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_pairwise_map(x[0], x[1], profiler);
+        DebugInfo::new("Add", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -146,8 +203,9 @@ impl Operator<2> for Sub {
         x0 - x1
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Sub", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_pairwise_map(x[0], x[1], profiler);
+        DebugInfo::new("Sub", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -175,8 +233,10 @@ impl Operator<1> for Neg {
         -x
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("Neg", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+
+        DebugInfo::new("Neg", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -198,8 +258,9 @@ impl Operator<2> for Mul {
         x0 * x1
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Mul", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_pairwise_map(x[0], x[1], profiler);
+        DebugInfo::new("Mul", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -237,8 +298,9 @@ impl Operator<2> for Div {
         x0 / x1
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new("Div", y.shape().size(), pairwise_comp_time(1.0, x[0], x[1]))
+    fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_pairwise_map(x[0], x[1], profiler);
+        DebugInfo::new("Div", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -270,8 +332,9 @@ impl Operator<1> for ScalarAdd {
         x + self.scalar
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarAdd", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("ScalarAdd", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -291,8 +354,9 @@ impl Operator<1> for ScalarSub {
         x - self.scalar
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarSub", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("ScalarSub", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -312,8 +376,9 @@ impl Operator<1> for ScalarMul {
         x * self.scalar
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarMul", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("ScalarMul", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -333,8 +398,9 @@ impl Operator<1> for ScalarDiv {
         x / self.scalar
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new("ScalarDiv", y.shape().size(), elemwise_comp_time(1.0, x[0]))
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let comp_time = benchmark_elemwise_map(x[0], profiler);
+        DebugInfo::new("ScalarDiv", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -354,12 +420,30 @@ impl Operator<1> for Sum {
         x.sum_axis(self.axis, self.retain_axis)
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        DebugInfo::new(
-            "Sum",
-            y.shape().size(),
-            elemwise_comp_time(x[0].shape()[self.axis] as f32, x[0]),
-        )
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let uid = format!("sum_{}", x[0].shape().to_id());
+
+        let mut comp_time = elemwise_comp_time(x[0].shape()[self.axis] as f32, x[0]);
+
+        if let Some(t) = profiler.comp_time(&uid) {
+            comp_time = t;
+        } else {
+            let v1 = &uid;
+
+            profiler.add_benchmark(
+                &uid,
+                {
+                    // prep code
+                    torch_var(v1, x[0].shape())
+                },
+                {
+                    // exec code
+                    format!("torch.sum({}, dim={})", v1, self.axis)
+                },
+            );
+        }
+
+        DebugInfo::new("Sum", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -417,14 +501,30 @@ impl Operator<1> for SumTo {
         y
     }
 
-    fn debug_info(&self, x: [&Var; 1], y: &Var) -> DebugInfo {
-        let c = x[0].shape().size() / self.shape.size();
+    fn debug_info(&self, x: [&Var; 1], y: &Var, profiler: &mut Profiler) -> DebugInfo {
+        let uid = format!("sumto_{}", x[0].shape().to_id());
 
-        DebugInfo::new(
-            "SumTo",
-            y.shape().size(),
-            elemwise_comp_time(c as f32, x[0]),
-        )
+        let mut comp_time = elemwise_comp_time(1.0, x[0]);
+
+        if let Some(t) = profiler.comp_time(&uid) {
+            comp_time = t;
+        } else {
+            let v1 = &uid;
+
+            profiler.add_benchmark(
+                &uid,
+                {
+                    // prep code
+                    torch_var(v1, x[0].shape())
+                },
+                {
+                    // exec code
+                    format!("torch.sum({}, dim=({}))", v1, self.shape.to_string2())
+                },
+            );
+        }
+
+        DebugInfo::new("SumTo", y.shape().size(), comp_time)
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
@@ -452,7 +552,7 @@ impl Operator<1> for BroadcastTo {
         x.upcast(self.shape).unwrap()
     }
 
-    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], _y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("BroadcastTo", x[0].shape().size(), 1)
     }
 
@@ -482,7 +582,7 @@ impl Operator<1> for Reshape {
         x.reshape(self.to).unwrap()
     }
 
-    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], _y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("Reshape", x[0].shape().size(), 1)
     }
 
@@ -511,7 +611,7 @@ impl Operator<1> for Permute {
         x.permute(self.axes.as_slice())
     }
 
-    fn debug_info(&self, x: [&Var; 1], _y: &Var) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; 1], _y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("Permute", x[0].shape().size(), 1)
     }
 
@@ -546,7 +646,7 @@ impl Operator<1> for SelectIndex {
         x.index_axis(self.index, self.axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("SelectIndex", y.shape().size(), 1)
     }
 
@@ -572,7 +672,7 @@ impl Operator<1> for UnselectIndex {
         unimplemented!();
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("UnselectIndex", y.shape().size(), 1)
     }
 
@@ -601,7 +701,7 @@ impl Operator<1> for SelectSlice {
         x.slice_axis(self.index, self.index + self.slice_size, self.axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("SelectSlice", y.shape().size(), 1)
     }
 
@@ -629,7 +729,7 @@ impl Operator<1> for UnselectSlice {
         unimplemented!();
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("UnselectSlice", y.shape().size(), 1)
     }
 
@@ -655,7 +755,7 @@ impl Operator<1> for SelectMultiIndex {
         unimplemented!();
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("SelectMultiIndex", y.shape().size(), 1)
     }
 
@@ -681,7 +781,7 @@ impl Operator<1> for UnselectMultiIndex {
         unimplemented!();
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("UnselectMultiIndex", y.shape().size(), 1)
     }
 
@@ -710,12 +810,8 @@ impl Operator<2> for Concat {
         Tensor::cat(&[x0, x1], self.axis).unwrap()
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new(
-            "Concat",
-            y.shape().size(),
-            pairwise_comp_time(0.3, x[0], x[1]),
-        )
+    fn debug_info(&self, x: [&Var; 2], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+        DebugInfo::new("Concat", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -758,12 +854,8 @@ impl Operator<2> for Stack {
         Tensor::stack(&[x0, x1], self.axis).unwrap()
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new(
-            "Stack",
-            y.shape().size(),
-            pairwise_comp_time(0.3, x[0], x[1]),
-        )
+    fn debug_info(&self, x: [&Var; 2], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+        DebugInfo::new("Stack", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
@@ -798,7 +890,7 @@ impl Operator<1> for Expand {
         x.expand_dims(self.axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("Expand", y.shape().size(), 1)
     }
 
@@ -822,7 +914,7 @@ impl Operator<1> for Squeeze {
         x.squeeze(self.axis)
     }
 
-    fn debug_info(&self, _x: [&Var; 1], y: &Var) -> DebugInfo {
+    fn debug_info(&self, _x: [&Var; 1], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new("Squeeze", y.shape().size(), 1)
     }
 

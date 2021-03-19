@@ -9,6 +9,7 @@ pub mod stats;
 use crate::autodiff::var::WeakVar;
 use crate::autodiff::Var;
 use crate::paper_experiments::f32_to_mibs;
+use crate::profile::Profiler;
 use crate::tensor::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
 use std::fmt;
@@ -29,7 +30,7 @@ pub trait Operator<const N: usize> {
 
     fn forward(self, x: [&Var; N]) -> Var;
 
-    fn debug_info(&self, x: [&Var; N], y: &Var) -> DebugInfo {
+    fn debug_info(&self, x: [&Var; N], y: &Var, profiler: &mut Profiler) -> DebugInfo {
         DebugInfo::new(
             "undefined",
             y.shape().size(),
@@ -82,9 +83,12 @@ impl<const N: usize> Operation<{ N }> {
         self.operator.compute(data_borrowed)
     }
 
-    pub fn debug_info(&self) -> DebugInfo {
-        self.operator
-            .debug_info(self.input.each_ref(), &self.output.to_var().unwrap())
+    pub fn debug_info(&self, profiler: &mut Profiler) -> DebugInfo {
+        self.operator.debug_info(
+            self.input.each_ref(),
+            &self.output.to_var().unwrap(),
+            profiler,
+        )
     }
 
     pub fn input(&self) -> [Var; N] {
@@ -137,10 +141,10 @@ impl OperationEnum {
         }
     }
 
-    pub fn debug_info(&self) -> DebugInfo {
+    pub fn debug_info(&self, profiler: &mut Profiler) -> DebugInfo {
         match self {
-            Self::Unary(o) => o.debug_info(),
-            Self::Binary(o) => o.debug_info(),
+            Self::Unary(o) => o.debug_info(profiler),
+            Self::Binary(o) => o.debug_info(profiler),
         }
     }
 

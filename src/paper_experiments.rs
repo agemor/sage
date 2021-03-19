@@ -53,7 +53,7 @@ pub fn exp1_memory_profile() {
         stacked_lstm.init();
 
         // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 128, 32], 1.0).to_var();
+        let input_images = Tensor::from_elem([batch_size, 64, 256], 1.0).to_var();
         let labels = Tensor::from_elem([1, 10], 1.0).to_var();
 
         // Bert logits (classification results)
@@ -73,7 +73,7 @@ pub fn exp1_memory_profile() {
     }
 
     fn mock_resnet(batch_size: usize) -> (Var, Vec<Var>) {
-        let resnet = ResNet::new(ResNetConfig::d152());
+        let resnet = ResNet::new(ResNetConfig::d18());
         resnet.init();
 
         // Mock input data
@@ -95,7 +95,7 @@ pub fn exp1_memory_profile() {
     }
 
     fn mock_densenet(batch_size: usize) -> (Var, Vec<Var>) {
-        let densenet = DenseNet::new(DenseNetConfig::d169());
+        let densenet = DenseNet::new(DenseNetConfig::d121());
         densenet.init();
 
         // Mock input data
@@ -139,72 +139,100 @@ pub fn exp1_memory_profile() {
         (logits, grad_vec)
     }
 
-    let batch_size = 1;
+    let batch_size = 8;
+    //
+    // let resnet = mock_resnet(batch_size);
+    // let densenet = mock_densenet(batch_size);
+    // let bert = mock_bert(batch_size);
+    // let stacked_lstm = mock_stacked_lstm(batch_size);
+    // let dcgan = mock_dcgan(batch_size);
+    //
+    // let models = [resnet, densenet, bert, stacked_lstm, dcgan];
+    // let model_names = ["resnet", "densenet", "bert", "stacked_lstm", "dcgan"];
+    //
+    // let batch_sizes = [1, 2, 4, 8, 16, 32, 64];
+    //
+    // for i in 0..5 {
+    //     let model = &models[i];
+    //     let model_name = &model_names[i];
+    //
+    //     if i != 3 {
+    //         continue;
+    //     }
+    //
+    //     let mut sim = Sim::new(model.1.clone());
+    //     sim.start();
+    //     sim.clear_mem();
+    //
+    //     println!("[model {}] normal peak: {}", model_name, sim);
+    //
+    //     let mut budget = (sim.peak_mem_used as f32 / 1.5) as usize;
+    //     let iter_threshold = 10000000;
+    //
+    //     loop {
+    //         println!("trying: {}", f32_to_mibs(budget));
+    //
+    //         let mut sim = Sim::with_budget(model.1.clone(), budget, iter_threshold);
+    //         if !sim.start() {
+    //             sim.clear_mem();
+    //             break;
+    //         }
+    //         sim.clear_mem();
+    //         budget -= mibs_to_f32(20);
+    //     }
+    //
+    //     println!("[model {}] min peak  : {}", model_name, f32_to_mibs(budget));
+    // }
 
-    let resnet = mock_resnet(batch_size);
-    let densenet = mock_densenet(batch_size);
-    let bert = mock_bert(batch_size);
-    let stacked_lstm = mock_stacked_lstm(batch_size);
-    let dcgan = mock_dcgan(batch_size);
+    let batches = [1, 2, 4, 8, 16];
+    let budgets = [2000, 3000, 4000, 5000, 6000, 7000, 8000];
 
-    let models = [resnet, densenet, bert, stacked_lstm, dcgan];
-    let model_names = ["resnet", "densenet", "bert", "stacked_lstm", "dcgan"];
-
-    let batch_sizes = [1, 2, 4, 8, 16, 32, 64];
-
-    for batch_size in batch_sizes.iter() {
-        let resnet = mock_densenet(*batch_size);
-
-        let mut sim = Sim::new(resnet.1.clone());
-        sim.start();
-        sim.clear_mem();
-
-        println!(
-            "[batch {}] normal peak: {}",
-            batch_size,
-            f32_to_mibs(sim.peak_mem_used)
-        );
-
-        let mut budget = sim.peak_mem_used / 5;
-        let iter_threshold = 1600000;
-
-        loop {
-            println!("trying: {}", f32_to_mibs(budget));
-
-            let mut sim = Sim::with_budget(resnet.1.clone(), budget, iter_threshold);
-            if !sim.start() {
-                sim.clear_mem();
-                break;
+    for &batch in batches.iter() {
+        for &budget in budgets.iter() {
+            if batch == 16 && budget <= 3000 {
+                continue;
             }
+
+            let bert = mock_bert(batch);
+            let mut sim = Sim::with_budget(bert.1.clone(), mibs_to_f32(budget), 1800000);
+            sim.start();
             sim.clear_mem();
-            budget -= mibs_to_f32(200);
+            println!(
+                "({}, {}): {}",
+                batch,
+                budget,
+                (sim.total_iter as f32).sqrt()
+            );
         }
-
-        println!("[batch {}] min peak  : {}", batch_size, f32_to_mibs(budget));
     }
 
-    return;
-
-    for (i, model) in models.iter().enumerate() {
-        // evaluate grads
-        // forward pass
-        let model_name = model_names[i];
-        //let min_budget = min_budgets[i];
-
-        println!("evaluating {}", model_name);
-
-        let mut sim = Sim::new(vec![model.0.clone()]);
-        sim.start();
-        sim.clear_mem();
-
-        println!("    - forward: {}", sim);
-
-        let mut sim = Sim::new(model.1.clone());
-        sim.start();
-        sim.clear_mem();
-
-        println!("    - backward: {}", sim);
-    }
+    // return;
+    //
+    // for (i, model) in models.iter().enumerate() {
+    //     // evaluate grads
+    //     // forward pass
+    //     let model_name = model_names[i];
+    //
+    //     if model_name != "bert" {
+    //         continue;
+    //     }
+    //
+    //     //let min_budget = min_budgets[i];
+    //
+    //     println!("evaluating {}", model_name);
+    //
+    //     let mut sim = Sim::new(vec![model.0.clone()]);
+    //     sim.start();
+    //     sim.clear_mem();
+    //
+    //     println!("    - forward: {}", sim);
+    //
+    //     let mut sim = Sim::new(model.1.clone());
+    //     sim.start();
+    //     sim.clear_mem();
+    //
+    //     println!("    - backward: {}", sim);
+    // }
 
     //return;
 

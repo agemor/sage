@@ -1,6 +1,7 @@
 use crate::autodiff::ops::{DebugInfo, Operation, OperationEnum, Operator};
 use crate::autodiff::session::Session;
 use crate::autodiff::Ranked;
+use crate::profile::Profiler;
 use crate::tensor::shape::{Shape, ToIndex, ToShape};
 use crate::tensor::Tensor;
 use std::cell::{Ref, RefCell, RefMut};
@@ -26,9 +27,9 @@ impl VarNode {
         }
     }
 
-    pub fn recompute_heuristic(&self) -> Option<f64> {
+    pub fn recompute_heuristic(&self, profiler: &mut Profiler) -> Option<f64> {
         if let Some(ref runtime) = self.runtime {
-            let time = self.recompute_time() as f64;
+            let time = self.recompute_time(profiler) as f64;
             let space = runtime.mem_store as f64;
             Some(time / space)
         } else {
@@ -37,7 +38,7 @@ impl VarNode {
     }
 
     // get re-computation cost, in a dynamic-programming fashion.
-    fn recompute_time(&self) -> usize {
+    fn recompute_time(&self, profiler: &mut Profiler) -> usize {
         if let Some(ref operation) = self.origin {
             let mut time = 0;
             let mut stack = Vec::<Var>::new();
@@ -58,7 +59,7 @@ impl VarNode {
                 // time += runtime.call_time;
 
                 if let Some(ref operation) = var_node.origin {
-                    let di = operation.debug_info();
+                    let di = operation.debug_info(profiler);
 
                     time += di.comp_time;
 
@@ -260,11 +261,11 @@ impl Var {
         self.node_mut().data = Some(data);
     }
 
-    pub fn debug_info(&self) -> Option<DebugInfo> {
+    pub fn debug_info(&self, profiler: &mut Profiler) -> Option<DebugInfo> {
         let node = self.node();
 
         if let Some(op) = &node.origin {
-            Some(op.debug_info())
+            Some(op.debug_info(profiler))
         } else {
             None
         }

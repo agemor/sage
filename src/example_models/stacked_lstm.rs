@@ -14,9 +14,9 @@ pub struct StackedLstmConfig {
 impl StackedLstmConfig {
     pub fn d5() -> Self {
         StackedLstmConfig {
-            input_size: 32,
+            input_size: 256,
             hidden_size: 256,
-            num_layers: 12,
+            num_layers: 5,
             num_classes: 10,
         }
     }

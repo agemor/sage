@@ -6,6 +6,7 @@
 use crate::autodiff::var::RuntimeProfile;
 use crate::autodiff::Var;
 use crate::paper_experiments::f32_to_mibs;
+use crate::profile::Profiler;
 use crate::tensor::Tensor;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
@@ -28,6 +29,8 @@ pub struct Sim {
     pub global_lock: HashSet<Var>,
 
     pub resolved: HashSet<Var>,
+
+    pub profiler: Profiler,
 }
 
 impl fmt::Display for Sim {
@@ -65,6 +68,7 @@ impl Sim {
             iter_threshold: 0,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
+            profiler: Profiler::new(),
         }
     }
 
@@ -80,6 +84,7 @@ impl Sim {
             iter_threshold,
             global_lock: HashSet::new(),
             resolved: HashSet::new(),
+            profiler: Profiler::new(),
         }
     }
 
@@ -300,7 +305,7 @@ impl Sim {
                     }
 
                     if self.resolved.insert(var.clone()) {
-                        comp_time += op.debug_info().comp_time;
+                        comp_time += op.debug_info(&mut self.profiler).comp_time;
 
                         self.alloc_mem(mem_size);
                     }
@@ -428,8 +433,10 @@ impl Sim {
                 .resolved
                 .iter()
                 .filter(|v| !self.global_lock.contains(v) && !v.is_leaf())
-                .max_by_key(|v| v.shape().size())
-                //.min_by_key(|v| (v.node().recompute_heuristic().unwrap() * 100000.0) as usize)
+                //.max_by_key(|v| v.shape().size())
+                .min_by_key(|v| {
+                    (v.node().recompute_heuristic(&mut self.profiler).unwrap() * 100000.0) as usize
+                })
                 .cloned();
 
             // ! must_keep.contains(v)()
@@ -441,7 +448,7 @@ impl Sim {
                 //println!("freed node : {}", var.debug_info().unwrap());
 
                 if self.resolved.remove(&var) {
-                    recomp_time += var.debug_info().unwrap().comp_time;
+                    recomp_time += var.debug_info(&).unwrap().comp_time;
 
                     let mut var_node = var.node_mut();
 

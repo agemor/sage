@@ -1,5 +1,6 @@
 use crate::autodiff::ops::{elemwise_comp_time, pairwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
+use crate::profile::Profiler;
 use crate::tensor::Tensor;
 
 // loss functions
@@ -16,12 +17,8 @@ impl Operator<2> for SoftmaxCrossEntropy {
         -log_p.sum_axis(1, false)
     }
 
-    fn debug_info(&self, x: [&Var; 2], y: &Var) -> DebugInfo {
-        DebugInfo::new(
-            "SoftmaxCrossEntropy",
-            y.shape().size(),
-            pairwise_comp_time(2.0, x[0], x[1]),
-        )
+    fn debug_info(&self, x: [&Var; 2], y: &Var, _profiler: &mut Profiler) -> DebugInfo {
+        DebugInfo::new("SoftmaxCrossEntropy", y.shape().size(), 1)
     }
 
     fn forward(self, x: [&Var; 2]) -> Var {
