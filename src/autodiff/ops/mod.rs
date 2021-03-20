@@ -179,7 +179,8 @@ impl OperationEnum {
 pub struct DebugInfo {
     desc: String,
     mem_size: usize,
-    pub(crate) comp_time: usize,
+    pub comp_time: usize,
+    pub energy_factor: f32,
 }
 
 impl DebugInfo {
@@ -188,6 +189,16 @@ impl DebugInfo {
             desc: String::from(s),
             mem_size,
             comp_time,
+            energy_factor: 1.0,
+        }
+    }
+
+    pub fn with_ef(s: &str, mem_size: usize, comp_time: usize, ef: f32) -> Self {
+        DebugInfo {
+            desc: String::from(s),
+            mem_size,
+            comp_time,
+            energy_factor: ef,
         }
     }
 }

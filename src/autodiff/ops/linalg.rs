@@ -1,6 +1,6 @@
 use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
-use crate::profile::{torch_var, Profiler};
+use crate::profile::{torch_del_var, torch_var, Profiler};
 use crate::tensor::shape::{Shape, ToIndex};
 use crate::tensor::Tensor;
 
@@ -28,7 +28,6 @@ impl Operator<2> for MatmulGrad1 {
     }
 
     fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {
-
         let uid = format!("matmul_grad1_{}", x[0].shape().to_id());
 
         let mut comp_time = 1;
@@ -49,7 +48,7 @@ impl Operator<2> for MatmulGrad1 {
         // let n = x0.shape()[x0.rank() - 1];
         // let p = x1.shape()[x1.rank() - 1];
 
-        DebugInfo::new("MatmulGrad1", y.shape().size(), comp_time)
+        DebugInfo::with_ef("MatmulGrad1", y.shape().size(), comp_time, 4.219)
     }
 
     fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
@@ -70,15 +69,21 @@ impl Operator<2> for MatmulGrad1 {
             },
             {
                 // exec code
-                format!(
-                    "torch.matmul({}[0, :], torch.transpose({}[0, :], -1, -2))",
-                    v1,
-                    v2
-                )
+                if x[0].rank() > 3 {
+                    format!(
+                        "torch.matmul({}[0, :], torch.transpose({}[0, :], -1, -2))",
+                        v1, v2
+                    )
+                } else {
+                    format!("torch.matmul({}, torch.transpose({}, -1, -2))", v1, v2)
+                }
+            },
+            {
+                // clear code
+                format!("{}{}", torch_del_var(&v1), torch_del_var(&v2))
             },
         );
     }
-
 
     fn forward(self, x: [&Var; 2]) -> Var {
         let x0 = x[0];
@@ -133,7 +138,7 @@ impl Operator<2> for MatmulGrad2 {
         // let n = x0.shape()[x0.rank() - 1];
         // let p = x1.shape()[x1.rank() - 1];
 
-        DebugInfo::new("MatmulGrad2", y.shape().size(), comp_time)
+        DebugInfo::with_ef("MatmulGrad2", y.shape().size(), comp_time, 4.120)
     }
 
     fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
@@ -155,11 +160,19 @@ impl Operator<2> for MatmulGrad2 {
             {
                 // exec code
                 //         //let gx1 = x0.transpose(-1, -2).matmul(gy).sum_to(x1.shape());
-                format!(
-                    "torch.matmul(torch.transpose({}, -1, -2), {}[0, :])",
-                    v1,
-                    v2
-                )
+
+                if x[1].rank() > 3 {
+                    format!(
+                        "torch.matmul(torch.transpose({}, -1, -2), {}[0, :])",
+                        v1, v2
+                    )
+                } else {
+                    format!("torch.matmul(torch.transpose({}, -1, -2), {})", v1, v2)
+                }
+            },
+            {
+                // clear code
+                format!("{}{}", torch_del_var(&v1), torch_del_var(&v2))
             },
         );
     }
@@ -219,7 +232,7 @@ impl Operator<2> for Matmul {
         // let n = x0.shape()[x0.rank() - 1];
         // let p = x1.shape()[x1.rank() - 1];
 
-        DebugInfo::new("Matmul", y.shape().size(), comp_time)
+        DebugInfo::with_ef("Matmul", y.shape().size(), comp_time, 3.211)
     }
 
     fn add_bench(&self, x: [&Var; 2], profiler: &mut Profiler) {
@@ -241,6 +254,10 @@ impl Operator<2> for Matmul {
             {
                 // exec code
                 format!("torch.matmul({}, {})", v1, v2)
+            },
+            {
+                // clear code
+                format!("{}{}", torch_del_var(&v1), torch_del_var(&v2))
             },
         );
     }

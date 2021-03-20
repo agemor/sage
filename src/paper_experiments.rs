@@ -13,9 +13,9 @@ use crate::example_models::resnet::{ResNet, ResNetConfig};
 use crate::example_models::stacked_lstm::{StackedLstm, StackedLstmConfig};
 use crate::layers::normalization::LayerNorm;
 use crate::layers::{Parameter, Stackable};
+use crate::profile::{test_profile, Profiler};
 use crate::tensor::Tensor;
 use itertools::Itertools;
-use crate::profile::{Profiler, test_profile};
 use std::fs::File;
 use std::io::Write;
 
@@ -56,7 +56,7 @@ pub fn exp1_memory_profile() {
         stacked_lstm.init();
 
         // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 64, 256], 1.0).to_var();
+        let input_images = Tensor::from_elem([batch_size, 32, 512], 1.0).to_var();
         let labels = Tensor::from_elem([1, 10], 1.0).to_var();
 
         // Bert logits (classification results)
@@ -189,30 +189,70 @@ pub fn exp1_memory_profile() {
 
     let mut profiler = test_profile();
 
-    let batches = [1, 2, 4, 8, 16];
-    let budgets = [4000];
+    let bert = mock_densenet(4);
+    let budget = 4000;
 
-    for &batch in batches.iter() {
-        for &budget in budgets.iter() {
-            if batch == 16 && budget <= 3000 {
-                continue;
-            }
+    let mut sim = Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    let mut kv = String::new();
+    let mut rv = String::new();
+    let mut tv = String::new();
+    let mut ev = String::new();
 
-            let bert = mock_bert(batch);
-            let mut sim = Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1800000);
-            sim.start();
-            sim.clear_mem();
-            println!(
-                "({}, {}): {}",
-                batch,
-                budget,
-                sim
-            );
-        }
+    println!("{}", sim.calltrace.len());
+
+    for (k, r, t, e) in sim.calltrace.iter() {
+        kv.push(if *k { '1' } else { '0' });
+        kv.push(',');
+
+        rv.push(if *r { '1' } else { '0' });
+        rv.push(',');
+
+        tv.push_str(&t.to_string());
+        tv.push(',');
+
+        ev.push_str(&e.to_string());
+        ev.push(',');
     }
+    kv.push('\n');
+    kv.push_str(&rv);
+    kv.push('\n');
+    kv.push_str(&tv);
+    kv.push('\n');
+    kv.push_str(&ev);
 
-    let mut file = File::create("torch_bench.py").unwrap();
-    file.write_all(profiler.gen_benchmark(2).as_ref());
+    let mut file = File::create("ep.csv").unwrap();
+    file.write_all(kv.as_ref());
+
+    //
+    // let batches = [16];
+    // let budgets = [30, 60, 90, 120, 150, 180, 210, 240, 270, 300];
+    //
+    // let models = [
+    //     //mock_resnet,
+    //     //mock_densenet,
+    //     //mock_bert,
+    //     //mock_stacked_lstm,
+    //     mock_dcgan,
+    // ];
+    //
+    // for &model in models.iter() {
+    //     for &batch in batches.iter() {
+    //         for &budget in budgets.iter().rev() {
+    //             let bert = model(batch);
+    //             let mut sim =
+    //                 Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1000000);
+    //             sim.start();
+    //             sim.clear_mem();
+    //             println!("({}, {}): {}", batch, budget, sim);
+    //         }
+    //     }
+    // }
+    //
+    //
+    //
+    // let mut file = File::create("torch_bench.txt").unwrap();
+    // file.write_all(profiler.gen_benchmark(2).as_ref());
 
     // return;
     //

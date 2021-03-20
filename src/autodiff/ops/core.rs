@@ -1,6 +1,6 @@
 use crate::autodiff::ops::{elemwise_comp_time, pairwise_comp_time, DebugInfo, Operator};
 use crate::autodiff::var::{ToVar, Var};
-use crate::profile::{torch_var, Profiler};
+use crate::profile::{torch_del_var, torch_var, Profiler};
 use crate::tensor::shape::{Shape, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
 use std::{cmp, ops};
@@ -145,6 +145,10 @@ pub fn add_bench_pairwise_map(x0: &Var, x1: &Var, profiler: &mut Profiler) {
             // exec code
             format!("{} + {}", v1, v2)
         },
+        {
+            // clear code
+            format!("{}{}", torch_del_var(&v1), torch_del_var(&v2))
+        },
     );
 }
 
@@ -160,6 +164,10 @@ pub fn add_bench_elemwise_map(x: &Var, profiler: &mut Profiler) {
         {
             // exec code
             format!("torch.nn.functional.relu({})", v)
+        },
+        {
+            // clear code
+            torch_del_var(v)
         },
     );
 }
@@ -482,6 +490,10 @@ impl Operator<1> for Sum {
                 // exec code
                 format!("torch.sum({}, dim={})", v1, self.axis)
             },
+            {
+                // clear code
+                torch_del_var(v1)
+            },
         );
     }
 
@@ -567,6 +579,10 @@ impl Operator<1> for SumTo {
             {
                 // exec code
                 format!("torch.sum({}, dim=-1)", v1)
+            },
+            {
+                // clear code
+                torch_del_var(v1)
             },
         );
     }

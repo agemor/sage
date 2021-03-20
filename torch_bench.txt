@@ -1,0 +1,14 @@
+import timeit
+import torch
+from tqdm import tqdm
+pbar = tqdm(total=0)
+benchmark = {}
+for i in range(2):
+pbar.close()
+rust_code = '['
+for uid in benchmark:
+    rust_code += '("' + uid + '", ' + str(benchmark[uid] / 2) + '), '
+rust_code += ']'
+f = open("out.txt", "w")
+f.write(rust_code)
+f.close()

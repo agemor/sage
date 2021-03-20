@@ -23,15 +23,17 @@ pub struct Sim<'a> {
     pub total_iter: usize,
     pub elapsed_time: f32,
     pub comp_time: usize,
+    pub energy_use: usize,
 
     pub targets: Vec<Var>,
     pub iter_threshold: usize,
 
     pub global_lock: HashSet<Var>,
-
+    pub once_evicted: HashSet<Var>,
     pub resolved: HashSet<Var>,
 
     pub profiler: &'a mut Profiler,
+    pub calltrace: Vec<(bool, bool, usize, usize)>,
 }
 
 impl<'a> fmt::Display for Sim<'a> {
@@ -67,11 +69,14 @@ impl<'a> Sim<'a> {
             model_mem: 0,
             total_iter: 0,
             comp_time: 0,
+            energy_use: 0,
             targets,
             iter_threshold: 0,
             global_lock: HashSet::new(),
+            once_evicted: HashSet::new(),
             resolved: HashSet::new(),
             profiler,
+            calltrace: Vec::new(),
         }
     }
 
@@ -89,11 +94,14 @@ impl<'a> Sim<'a> {
             model_mem: 0,
             total_iter: 0,
             comp_time: 0,
+            energy_use: 0,
             targets,
             iter_threshold,
             global_lock: HashSet::new(),
+            once_evicted: HashSet::new(),
             resolved: HashSet::new(),
             profiler,
+            calltrace: Vec::new(),
         }
     }
 
@@ -194,11 +202,14 @@ impl<'a> Sim<'a> {
         let start_time = Instant::now();
         let mut comp_time: usize = 0;
         let mut recomp_time: usize = 0;
+        let mut energy_use: usize = 0;
 
         // default work stack
         let mut stack = Vec::<Var>::new();
         let mut visit_planned = HashSet::<Var>::new();
         // initialize stack with target variables
+
+        let mut once_evicted = HashSet::<Var>::new();
 
         stack.extend(self.targets.clone());
         visit_planned.extend(self.targets.clone());
@@ -314,9 +325,24 @@ impl<'a> Sim<'a> {
                     }
 
                     if self.resolved.insert(var.clone()) {
-                        op.add_bench(&mut self.profiler);
+                        /////////////////////// AADDDDD BBENCCCCHHH!!
 
-                        comp_time += op.debug_info(&self.profiler).comp_time;
+                        //op.add_bench(&mut self.profiler);
+
+                        let di = op.debug_info(&self.profiler);
+                        comp_time += di.comp_time;
+                        energy_use += (di.comp_time as f32 * di.energy_factor) as usize;
+
+                        let recomputed = self.once_evicted.contains(&var);
+
+                        let is_energy_intensive = di.energy_factor > 1.0;
+
+                        self.calltrace.push((
+                            is_energy_intensive,
+                            recomputed,
+                            comp_time,
+                            energy_use,
+                        ));
 
                         self.alloc_mem(mem_size);
                     }
@@ -407,6 +433,7 @@ impl<'a> Sim<'a> {
         //
         // println!("   - comp time: {} millis", comp_time / 1024 / 1024 / 1024);
         self.comp_time = comp_time;
+        self.energy_use = energy_use;
         self.total_iter = iterations;
         self.elapsed_time = start_time.elapsed().as_millis() as f32 / 1000.0;
 
@@ -464,7 +491,7 @@ impl<'a> Sim<'a> {
                     let mut var_node = var.node_mut();
 
                     let mem_size = var_node.shape.size();
-
+                    self.once_evicted.insert(var.clone());
                     var_node.free_data();
                     self.free_mem(mem_size);
                     mem_freed += mem_size;

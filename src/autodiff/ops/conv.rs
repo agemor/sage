@@ -1,6 +1,6 @@
 use crate::autodiff::ops::{DebugInfo, Operator};
 use crate::autodiff::var::Var;
-use crate::profile::{torch_var, Profiler};
+use crate::profile::{torch_del_var, torch_var, Profiler};
 use crate::tensor::shape::Shape;
 use crate::tensor::Tensor;
 
@@ -153,9 +153,13 @@ impl Operator<1> for Im2Col {
             {
                 // exec code
                 format!(
-                    "torch.nn.functional.unfold({}, {}, 1, {}, {})",
-                    v1, self.kernel_size, self.padding, self.stride
+                    "torch.nn.functional.unfold({}, ({}, {}), 1, {}, {})",
+                    v1, self.kernel_size, self.kernel_size, self.padding, self.stride
                 )
+            },
+            {
+                // clear code
+                torch_del_var(v1)
             },
         );
     }
@@ -233,7 +237,7 @@ impl Operator<1> for Col2Im {
             self.stride,
             self.padding
         );
-        let mut comp_time = self.kernel_size * self.kernel_size * 219;
+        let mut comp_time = 1;
 
         if let Some(t) = profiler.comp_time(&uid) {
             comp_time = t;
@@ -252,22 +256,28 @@ impl Operator<1> for Col2Im {
         );
 
         let v1 = &uid;
-
-        profiler.add_benchmark(
-            &uid,
-            {
-                // prep code
-                let s = x[0].shape();
-                torch_var(v1, [s[0], s[1] * s[2] * s[3], s[4], s[5]])
-            },
-            {
-                // exec code
-                format!(
-                    "torch.nn.functional.unfold({}, {}, 1, {}, {})",
-                    v1, self.kernel_size, self.padding, self.stride
-                )
-            },
-        );
+        //
+        // profiler.add_benchmark(
+        //     &uid,
+        //     {
+        //         // prep code
+        //         let s = x[0].shape();
+        //         torch_var(v1, [s[0], s[1] * s[2] * s[3], s[4] * s[5]])
+        //     },
+        //     {
+        //         // exec code
+        //         let s = x[0].shape();
+        //
+        //         format!(
+        //             "torch.nn.functional.fold({}, ({}, {}), ({}, {}), 1, {}, {})",
+        //             v1, s[4], s[5], self.kernel_size, self.kernel_size, self.padding, self.stride
+        //         )
+        //     },
+        //     {
+        //         // clear code
+        //         torch_del_var(v1)
+        //     },
+        // );
     }
 
     fn forward(self, x: [&Var; 1]) -> Var {
