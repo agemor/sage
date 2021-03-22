@@ -10,6 +10,8 @@ use crate::profile::Profiler;
 use crate::tensor::Tensor;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{cmp, fmt};
 
@@ -33,6 +35,7 @@ pub struct Sim<'a> {
     pub resolved: HashSet<Var>,
 
     pub profiler: &'a mut Profiler,
+    pub memtrace: Vec<(usize, usize, bool)>,
     pub calltrace: Vec<(bool, bool, usize, usize)>,
 }
 
@@ -76,6 +79,7 @@ impl<'a> Sim<'a> {
             once_evicted: HashSet::new(),
             resolved: HashSet::new(),
             profiler,
+            memtrace: Vec::new(),
             calltrace: Vec::new(),
         }
     }
@@ -101,6 +105,7 @@ impl<'a> Sim<'a> {
             once_evicted: HashSet::new(),
             resolved: HashSet::new(),
             profiler,
+            memtrace: Vec::new(),
             calltrace: Vec::new(),
         }
     }
@@ -204,12 +209,17 @@ impl<'a> Sim<'a> {
         let mut recomp_time: usize = 0;
         let mut energy_use: usize = 0;
 
+        // dynamic budget
+
+        let budget_plan = [
+            0.7, 0.7, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 0.7, 0.7, 0.7,
+            1.3, 1.3, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0,
+        ];
+
         // default work stack
         let mut stack = Vec::<Var>::new();
         let mut visit_planned = HashSet::<Var>::new();
         // initialize stack with target variables
-
-        let mut once_evicted = HashSet::<Var>::new();
 
         stack.extend(self.targets.clone());
         visit_planned.extend(self.targets.clone());
@@ -225,6 +235,9 @@ impl<'a> Sim<'a> {
 
         while !stack.is_empty() {
             iterations += 1;
+
+            let bpi = (iterations / 150) % budget_plan.len();
+            let current_budget = (self.mem_budget as f32 * budget_plan[bpi]) as usize;
 
             if iterations > self.iter_threshold && self.iter_threshold != 0 {
                 return false;
@@ -248,6 +261,7 @@ impl<'a> Sim<'a> {
             //self.collect_garbage();
             let var = stack.last().cloned().unwrap();
             let mut resolved = false;
+            let mut is_recomputation = false;
 
             // if not evaluated...
             if !var.is_evaluated() {
@@ -299,7 +313,7 @@ impl<'a> Sim<'a> {
                     // check mem budget
                     //println!("current node : {}", op.debug_info());
 
-                    if self.mem_used + mem_size > self.mem_budget && self.mem_budget != 0 {
+                    if self.mem_used + mem_size > current_budget && self.mem_budget != 0 {
                         let mut must_keep = Vec::new();
                         // self-closure
                         if let Some(depmap) = depmap.get(&var) {
@@ -320,8 +334,8 @@ impl<'a> Sim<'a> {
                         //     must_keep.len()
                         // );
 
-                        recomp_time += self
-                            .greedy_drop(&must_keep, self.mem_used + mem_size - self.mem_budget);
+                        recomp_time +=
+                            self.greedy_drop(&must_keep, self.mem_used + mem_size - current_budget);
                     }
 
                     if self.resolved.insert(var.clone()) {
@@ -333,13 +347,13 @@ impl<'a> Sim<'a> {
                         comp_time += di.comp_time;
                         energy_use += (di.comp_time as f32 * di.energy_factor) as usize;
 
-                        let recomputed = self.once_evicted.contains(&var);
+                        is_recomputation = self.once_evicted.contains(&var);
 
                         let is_energy_intensive = di.energy_factor > 1.0;
 
                         self.calltrace.push((
                             is_energy_intensive,
-                            recomputed,
+                            is_recomputation,
                             comp_time,
                             energy_use,
                         ));
@@ -417,10 +431,12 @@ impl<'a> Sim<'a> {
                     }
                 })
             }
+            self.memtrace
+                .push((self.mem_used, current_budget, is_recomputation));
 
-            if self.mem_used > self.mem_budget && self.mem_budget != 0 {
-                self.greedy_drop(&[var], self.mem_used - self.mem_budget);
-            }
+            // if self.mem_used > self.mem_budget && self.mem_budget != 0 {
+            //     self.greedy_drop(&[var], self.mem_used - self.mem_budget);
+            // }
         }
         //
         // if self.mem_budget == 0 {
@@ -601,5 +617,63 @@ impl<'a> Sim<'a> {
 
     fn free_mem(&mut self, size: usize) {
         self.mem_used -= cmp::min(size, self.mem_used);
+    }
+
+    pub fn save_calltrace(&self) {
+        let mut kv = String::new();
+        let mut rv = String::new();
+        let mut tv = String::new();
+        let mut ev = String::new();
+
+        println!("{}", self.calltrace.len());
+
+        for (k, r, t, e) in self.calltrace.iter() {
+            kv.push(if *k { '1' } else { '0' });
+            kv.push(',');
+
+            rv.push(if *r { '1' } else { '0' });
+            rv.push(',');
+
+            tv.push_str(&t.to_string());
+            tv.push(',');
+
+            ev.push_str(&e.to_string());
+            ev.push(',');
+        }
+        kv.push('\n');
+        kv.push_str(&rv);
+        kv.push('\n');
+        kv.push_str(&tv);
+        kv.push('\n');
+        kv.push_str(&ev);
+
+        let mut file = File::create("calltrace.csv").unwrap();
+        file.write_all(kv.as_ref());
+    }
+
+    pub fn save_memtrace(&self) {
+        let mut uv = String::new();
+        let mut bv = String::new();
+        let mut rv = String::new();
+
+        println!("{}", self.calltrace.len());
+
+        for (u, b, r) in self.memtrace.iter() {
+            uv.push_str(&u.to_string());
+            uv.push(',');
+
+            bv.push_str(&b.to_string());
+            bv.push(',');
+
+            rv.push(if *r { '1' } else { '0' });
+            rv.push(',');
+        }
+        uv.push('\n');
+        uv.push_str(&bv);
+        uv.push('\n');
+        uv.push_str(&rv);
+
+        let mut file = File::create("memtrace.csv").unwrap();
+        file.write_all(uv.as_ref());
     }
 }
