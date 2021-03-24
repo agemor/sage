@@ -236,7 +236,7 @@ impl<'a> Sim<'a> {
         while !stack.is_empty() {
             iterations += 1;
 
-            let bpi = (iterations / 150) % budget_plan.len();
+            let bpi = (iterations / (150) % budget_plan.len();
             let current_budget = (self.mem_budget as f32 * budget_plan[bpi]) as usize;
 
             if iterations > self.iter_threshold && self.iter_threshold != 0 {
@@ -619,7 +619,7 @@ impl<'a> Sim<'a> {
         self.mem_used -= cmp::min(size, self.mem_used);
     }
 
-    pub fn save_calltrace(&self) {
+    pub fn save_calltrace(&self, file:&str) {
         let mut kv = String::new();
         let mut rv = String::new();
         let mut tv = String::new();
@@ -647,11 +647,11 @@ impl<'a> Sim<'a> {
         kv.push('\n');
         kv.push_str(&ev);
 
-        let mut file = File::create("calltrace.csv").unwrap();
+        let mut file = File::create(file).unwrap();
         file.write_all(kv.as_ref());
     }
 
-    pub fn save_memtrace(&self) {
+    pub fn save_memtrace(&self, file:&str) {
         let mut uv = String::new();
         let mut bv = String::new();
         let mut rv = String::new();
@@ -673,7 +673,7 @@ impl<'a> Sim<'a> {
         uv.push('\n');
         uv.push_str(&rv);
 
-        let mut file = File::create("memtrace.csv").unwrap();
+        let mut file = File::create(file).unwrap();
         file.write_all(uv.as_ref());
     }
 }

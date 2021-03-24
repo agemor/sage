@@ -13,9 +13,9 @@ use crate::example_models::resnet::{ResNet, ResNetConfig};
 use crate::example_models::stacked_lstm::{StackedLstm, StackedLstmConfig};
 use crate::layers::normalization::LayerNorm;
 use crate::layers::{Parameter, Stackable};
-use crate::profile::{test_profile, Profiler};
+use crate::profile::{test_profile, test_profile2, Profiler};
 use crate::tensor::Tensor;
-use itertools::Itertools;
+use itertools::{enumerate, zip, Itertools};
 use std::fs::File;
 use std::io::Write;
 
@@ -28,120 +28,257 @@ pub fn mibs_to_f32(mibs: usize) -> usize {
     mibs * 256 * 1024
 }
 
+fn mock_dcgan(batch_size: usize) -> (Var, Vec<Var>) {
+    let dcgan = DcGan::new(DcGanConfig::default());
+    dcgan.init();
+
+    // Mock input data
+    let input_images = Tensor::from_elem([batch_size, 100, 1, 1], 1.0).to_var();
+    let labels = Tensor::from_elem([batch_size, 1], 1.0).to_var();
+
+    // Bert logits (classification results)
+    let logits = dcgan.forward(&input_images);
+
+    // Evaluate loss
+    let loss = softmax_cross_entropy(&logits, &labels);
+
+    let params = dcgan.params().unwrap();
+    let grads = diff(&loss, &params);
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    (logits, grad_vec)
+}
+
+fn mock_stacked_lstm(batch_size: usize) -> (Var, Vec<Var>) {
+    let stacked_lstm = StackedLstm::new(StackedLstmConfig::d5());
+    stacked_lstm.init();
+
+    // Mock input data
+    let input_images = Tensor::from_elem([batch_size, 32, 512], 1.0).to_var();
+    let labels = Tensor::from_elem([1, 10], 1.0).to_var();
+
+    // Bert logits (classification results)
+    let logits = stacked_lstm.forward(&input_images);
+
+    println!("{}, {}", logits.shape(), labels.shape());
+
+    // Evaluate loss
+    let loss = softmax_cross_entropy(&logits, &labels);
+
+    let params = stacked_lstm.params().unwrap();
+    let grads = diff(&loss, &params);
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    (logits, grad_vec)
+}
+
+fn mock_resnet(batch_size: usize) -> (Var, Vec<Var>) {
+    let resnet = ResNet::new(ResNetConfig::d18());
+    resnet.init();
+
+    // Mock input data
+    let input_images = Tensor::from_elem([batch_size, 3, 128, 128], 1.0).to_var();
+    let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
+
+    // Bert logits (classification results)
+    let logits = resnet.forward(&input_images);
+
+    // Evaluate loss
+    let loss = softmax_cross_entropy(&logits, &labels);
+
+    let params = resnet.params().unwrap();
+    let grads = diff(&loss, &params);
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    (logits, grad_vec)
+}
+
+fn mock_densenet(batch_size: usize) -> (Var, Vec<Var>) {
+    let densenet = DenseNet::new(DenseNetConfig::d121());
+    densenet.init();
+
+    // Mock input data
+    let input_images = Tensor::from_elem([batch_size, 3, 128, 128], 1.0).to_var();
+    let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
+
+    // Bert logits (classification results)
+    let logits = densenet.forward(&input_images);
+
+    // Evaluate loss
+    let loss = softmax_cross_entropy(&logits, &labels);
+
+    let params = densenet.params().unwrap();
+    let grads = diff(&loss, &params);
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    (logits, grad_vec)
+}
+
+fn mock_bert(batch_size: usize) -> (Var, Vec<Var>) {
+    let bert = Bert::new(BertConfig::base());
+    bert.init();
+
+    // Mock input data
+    let token_ids = vec![vec![0; 512]; batch_size];
+    let attn_mask = Tensor::from_elem([batch_size, 512], 1.0).to_var();
+    let labels = Tensor::from_elem([batch_size, 2], 1.0).to_var();
+
+    // Bert logits (classification results)
+    let logits = bert.forward(&token_ids, &attn_mask);
+
+    // Evaluate loss
+    let loss = softmax_cross_entropy(&logits, &labels);
+
+    let params = bert.params().unwrap();
+    let grads = diff(&loss, &params);
+
+    let grad_vec = grads.values().cloned().collect_vec();
+
+    (logits, grad_vec)
+}
+
+pub fn tradeoff_analysis() {
+    let mut profiler = test_profile2();
+
+    let batches = [1, 2, 4, 8, 16];
+
+    let resnet_budget = vec![
+        vec![500, 1000, 1500],
+        vec![1000, 1500, 2000, 2500],
+        vec![1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000],
+        vec![
+            3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500,
+            10000,
+        ],
+        vec![
+            4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000,
+        ],
+    ];
+
+    let densenet_budget = vec![
+        vec![1500, 2000, 2500, 3000, 3500],
+        vec![2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000],
+        vec![
+            3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000,
+        ],
+        vec![6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000],
+    ];
+
+    let bert_budget = vec![
+        vec![800, 1000, 1500, 2000, 2500],
+        vec![1500, 2000, 2500, 3000, 3500],
+        vec![2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000],
+        vec![
+            3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500,
+            10000,
+        ],
+        vec![
+            5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000,
+        ],
+    ];
+
+    let lstm_budget = vec![vec![65, 70], vec![70, 75, 80], vec![95, 100, 105, 110, 115]];
+    let dcgan_budget = vec![
+        vec![150],
+        vec![150, 180],
+        vec![150, 180, 210],
+        vec![150, 180, 210, 240, 270],
+        vec![210, 240, 270, 300],
+    ];
+
+    let models = [
+        mock_resnet,
+        mock_densenet,
+        mock_bert,
+        mock_dcgan,
+        mock_stacked_lstm,
+    ];
+
+    let budgets = [
+        resnet_budget,
+        densenet_budget,
+        bert_budget,
+        dcgan_budget,
+        lstm_budget,
+    ];
+
+    for (&model, budgets) in zip(models.iter(), budgets.iter()) {
+
+        println!("......GATHER DATA.....");
+
+        for (i, &batch) in enumerate(batches.iter()) {
+            for &budget in budgets[i].iter().rev() {
+                let m = model(batch);
+                let mut sim =
+                    Sim::with_budget(&mut profiler, m.1.clone(), mibs_to_f32(budget), 1000000);
+                sim.start();
+                sim.clear_mem();
+                println!("({}, {}): {}", batch, budget, sim);
+            }
+        }
+    }
+}
+
+pub fn energy_heu() {
+    let mut profiler = test_profile();
+    let mut profiler2 = test_profile2();
+
+    let resnet = mock_resnet(4);
+    let bert = mock_bert(4);
+
+    let budget = 3000;
+
+    let mut sim = Sim::with_budget(&mut profiler, resnet.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    sim.clear_mem();
+    sim.save_calltrace("prof1_resnet_calltrace_energy.csv");
+
+    let mut sim = Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    sim.clear_mem();
+    sim.save_calltrace("prof1_bert_calltrace_energy.csv");
+
+    let mut sim = Sim::with_budget(&mut profiler2, resnet.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    sim.clear_mem();
+    sim.save_calltrace("prof2_resnet_calltrace_energy.csv");
+
+    let mut sim = Sim::with_budget(&mut profiler2, bert.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    sim.clear_mem();
+    sim.save_calltrace("prof2_bert_calltrace_energy.csv");
+
+}
+
+
+pub fn dyn_run() {
+    let mut profiler = test_profile();
+    let mut profiler2 = test_profile2();
+
+    let resnet = mock_resnet(4);
+    let bert = mock_bert(4);
+
+    let budget = 3000;
+
+
+    let mut sim = Sim::with_budget(&mut profiler2, bert.1.clone(), mibs_to_f32(budget), 1000000);
+    sim.start();
+    sim.clear_mem();
+    sim.save_memtrace("prof2_bert_memtrace.csv");
+
+
+
+}
+//
+///
+///
+
+
 pub fn exp1_memory_profile() {
-    fn mock_dcgan(batch_size: usize) -> (Var, Vec<Var>) {
-        let dcgan = DcGan::new(DcGanConfig::default());
-        dcgan.init();
-
-        // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 100, 1, 1], 1.0).to_var();
-        let labels = Tensor::from_elem([batch_size, 1], 1.0).to_var();
-
-        // Bert logits (classification results)
-        let logits = dcgan.forward(&input_images);
-
-        // Evaluate loss
-        let loss = softmax_cross_entropy(&logits, &labels);
-
-        let params = dcgan.params().unwrap();
-        let grads = diff(&loss, &params);
-
-        let grad_vec = grads.values().cloned().collect_vec();
-
-        (logits, grad_vec)
-    }
-
-    fn mock_stacked_lstm(batch_size: usize) -> (Var, Vec<Var>) {
-        let stacked_lstm = StackedLstm::new(StackedLstmConfig::d5());
-        stacked_lstm.init();
-
-        // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 32, 512], 1.0).to_var();
-        let labels = Tensor::from_elem([1, 10], 1.0).to_var();
-
-        // Bert logits (classification results)
-        let logits = stacked_lstm.forward(&input_images);
-
-        println!("{}, {}", logits.shape(), labels.shape());
-
-        // Evaluate loss
-        let loss = softmax_cross_entropy(&logits, &labels);
-
-        let params = stacked_lstm.params().unwrap();
-        let grads = diff(&loss, &params);
-
-        let grad_vec = grads.values().cloned().collect_vec();
-
-        (logits, grad_vec)
-    }
-
-    fn mock_resnet(batch_size: usize) -> (Var, Vec<Var>) {
-        let resnet = ResNet::new(ResNetConfig::d18());
-        resnet.init();
-
-        // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 3, 128, 128], 1.0).to_var();
-        let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
-
-        // Bert logits (classification results)
-        let logits = resnet.forward(&input_images);
-
-        // Evaluate loss
-        let loss = softmax_cross_entropy(&logits, &labels);
-
-        let params = resnet.params().unwrap();
-        let grads = diff(&loss, &params);
-
-        let grad_vec = grads.values().cloned().collect_vec();
-
-        (logits, grad_vec)
-    }
-
-    fn mock_densenet(batch_size: usize) -> (Var, Vec<Var>) {
-        let densenet = DenseNet::new(DenseNetConfig::d121());
-        densenet.init();
-
-        // Mock input data
-        let input_images = Tensor::from_elem([batch_size, 3, 128, 128], 1.0).to_var();
-        let labels = Tensor::from_elem([batch_size, 10], 1.0).to_var();
-
-        // Bert logits (classification results)
-        let logits = densenet.forward(&input_images);
-
-        // Evaluate loss
-        let loss = softmax_cross_entropy(&logits, &labels);
-
-        let params = densenet.params().unwrap();
-        let grads = diff(&loss, &params);
-
-        let grad_vec = grads.values().cloned().collect_vec();
-
-        (logits, grad_vec)
-    }
-
-    fn mock_bert(batch_size: usize) -> (Var, Vec<Var>) {
-        let bert = Bert::new(BertConfig::base());
-        bert.init();
-
-        // Mock input data
-        let token_ids = vec![vec![0; 512]; batch_size];
-        let attn_mask = Tensor::from_elem([batch_size, 512], 1.0).to_var();
-        let labels = Tensor::from_elem([batch_size, 2], 1.0).to_var();
-
-        // Bert logits (classification results)
-        let logits = bert.forward(&token_ids, &attn_mask);
-
-        // Evaluate loss
-        let loss = softmax_cross_entropy(&logits, &labels);
-
-        let params = bert.params().unwrap();
-        let grads = diff(&loss, &params);
-
-        let grad_vec = grads.values().cloned().collect_vec();
-
-        (logits, grad_vec)
-    }
-
     let batch_size = 8;
     //
     // let resnet = mock_resnet(batch_size);
@@ -194,35 +331,7 @@ pub fn exp1_memory_profile() {
 
     let mut sim = Sim::with_budget(&mut profiler, bert.1.clone(), mibs_to_f32(budget), 1000000);
     sim.start();
-    let mut kv = String::new();
-    let mut rv = String::new();
-    let mut tv = String::new();
-    let mut ev = String::new();
-
-    println!("{}", sim.calltrace.len());
-
-    for (k, r, t, e) in sim.calltrace.iter() {
-        kv.push(if *k { '1' } else { '0' });
-        kv.push(',');
-
-        rv.push(if *r { '1' } else { '0' });
-        rv.push(',');
-
-        tv.push_str(&t.to_string());
-        tv.push(',');
-
-        ev.push_str(&e.to_string());
-        ev.push(',');
-    }
-    kv.push('\n');
-    kv.push_str(&rv);
-    kv.push('\n');
-    kv.push_str(&tv);
-    kv.push('\n');
-    kv.push_str(&ev);
-
-    let mut file = File::create("ep.csv").unwrap();
-    file.write_all(kv.as_ref());
+    //sim.save_calltrace();
 
     //
     // let batches = [16];

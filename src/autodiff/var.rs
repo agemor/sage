@@ -61,7 +61,7 @@ impl VarNode {
                 if let Some(ref operation) = var_node.origin {
                     let di = operation.debug_info(profiler);
 
-                    time += di.comp_time;
+                    time += di.comp_time;//(di.comp_time as f32 * di.energy_factor) as usize;
 
                     for v in operation.input() {
                         if !v.is_evaluated() {

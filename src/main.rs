@@ -22,7 +22,7 @@ use crate::layers::activations::Relu;
 use crate::layers::base::{Dense, Sequential};
 use crate::layers::{Parameter, Stackable};
 use crate::optim::{Optimizer, Sgd};
-use crate::paper_experiments::exp1_memory_profile;
+use crate::paper_experiments::{exp1_memory_profile, tradeoff_analysis, energy_heu, dyn_run};
 
 mod autodiff;
 mod data;
@@ -34,7 +34,7 @@ mod profile;
 mod tensor;
 
 fn main() {
-    exp1_memory_profile();
+    dyn_run();
 }
 
 fn mnist_trainng() {
