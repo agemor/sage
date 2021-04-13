@@ -1,3 +1,4 @@
+use crate::tensor::backend::UnaryOperation;
 use crate::tensor::shape::{ToIndex, ToShape};
 use crate::tensor::Tensor;
 use num_traits::FromPrimitive;
@@ -7,15 +8,14 @@ impl Tensor {
     where
         I: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
 
-        let max = self.max_axis(axis, true);
+        let max = self.max([axis], true);
 
         // for numerical stability
-        let mut y = self - max;
-        y.mapv_inplace(|x| x.exp());
+        let y = (self - max).exp();
 
-        let sum = y.sum_axis(axis, true);
+        let sum = y.sum([axis], true);
         y / sum
     }
 
@@ -23,42 +23,127 @@ impl Tensor {
     where
         I: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
 
         // (N, K) -> (N, 1)
-        let max = self.max_axis(axis, true);
+        let max = self.max([axis], true);
 
         // (N, K) - (N, 1) -> (N, K)
-        let mut y = self - &max;
-        y.mapv_inplace(|x| x.exp());
+        let y = (self - &max).exp();
 
         // (N, K) -> (N, '1)
-        let mut sum = y.sum_axis(axis, retain_axis);
-
-        sum.mapv_inplace(|x| x.ln());
+        let sum = y.sum([axis], retain_axis).log();
 
         // (N, '1) + (N, 1)
         if retain_axis {
             sum + max
         } else {
-            sum + max.squeeze(axis)
+            sum + max.squeeze_axis(axis)
         }
     }
 
+    pub fn abs(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Abs)
+    }
+
     pub fn recip(&self) -> Tensor {
-        self.map(|elem| elem.recip())
+        self.unary_op(UnaryOperation::Recip)
     }
 
     pub fn sqrt(&self) -> Tensor {
-        self.map(|elem| elem.sqrt())
+        self.unary_op(UnaryOperation::Sqrt)
     }
 
-    pub fn ln(&self) -> Tensor {
-        self.map(|elem| elem.ln())
+    pub fn rsqrt(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Rsqrt)
     }
 
-    pub fn pow(&self, n: f32) -> Tensor {
-        self.map(|elem| elem.powf(n))
+    pub fn square(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Square)
+    }
+
+    pub fn exp(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Exp)
+    }
+
+    pub fn expm1(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Expm1)
+    }
+
+    pub fn log(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Log)
+    }
+
+    pub fn log1p(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Log1p)
+    }
+
+    pub fn ceil(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Ceil)
+    }
+
+    pub fn floor(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Floor)
+    }
+
+    pub fn round(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Round)
+    }
+
+    pub fn sign(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Sign)
+    }
+
+    pub fn sin(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Sin)
+    }
+
+    pub fn sinh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Sinh)
+    }
+
+    pub fn asinh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Asinh)
+    }
+
+    pub fn asin(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Asin)
+    }
+
+    pub fn cos(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Cos)
+    }
+
+    pub fn cosh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Cosh)
+    }
+
+    pub fn acosh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Acosh)
+    }
+
+    pub fn acos(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Acos)
+    }
+
+    pub fn tan(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Tan)
+    }
+
+    pub fn tanh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Tanh)
+    }
+
+    pub fn atan(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Atan)
+    }
+
+    pub fn atanh(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Atanh)
+    }
+
+    pub fn sigmoid(&self) -> Tensor {
+        self.unary_op(UnaryOperation::Sigmoid)
     }
 }
 

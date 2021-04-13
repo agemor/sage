@@ -6,15 +6,16 @@ use std::rc::Rc;
 use std::{fmt, ptr, slice};
 
 use itertools::{zip, Itertools};
-use matrixmultiply;
 use ndarray::ShapeBuilder;
 use rand::distributions::Distribution;
 use rand::thread_rng;
 use rand_distr::Normal;
 
+use crate::tensor::backend::{Backend, BinaryOperation, Buffer};
 use crate::tensor::iter::{AlongAxisIter, Iter, IterMut};
-use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToShape};
+use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToIndices, ToShape};
 
+pub mod backend;
 pub mod init;
 pub mod iter;
 pub mod ops;
@@ -33,7 +34,7 @@ pub struct Tensor {
     offset: usize,
 
     // underlying array that holds actual data
-    arr: Rc<UnsafeCell<Vec<f32>>>,
+    buffer: Rc<Buffer>,
 }
 
 impl Tensor {
@@ -43,12 +44,16 @@ impl Tensor {
         self.shape
     }
 
+    pub fn extents(&self) -> &[usize] {
+        self.shape.sizes()
+    }
+
     pub fn strides(&self) -> &[usize] {
         &self.strides
     }
 
     // number of dimensions (also known as .. order, degree, ndims)
-    pub fn rank(&self) -> usize {
+    pub fn order(&self) -> usize {
         self.shape.len()
     }
 
@@ -57,15 +62,17 @@ impl Tensor {
         self.shape.size()
     }
 
-    pub fn arr(&self) -> &Vec<f32> {
-        unsafe { self.arr.get().as_ref() }.unwrap()
-    }
-    pub fn arr_mut(&self) -> &mut Vec<f32> {
-        unsafe { self.arr.get().as_mut() }.unwrap()
+    pub fn backend(&self) -> &dyn Backend {
+        self.buffer.backend()
     }
 
-    pub fn mem_size(&self) -> usize {
-        self.arr().len()
+    pub fn to_vec(&self) -> Vec<f32> {
+        self.buffer.to_vec()
+    }
+
+    pub fn equals(&self, other: &Tensor) -> bool {
+        let eq = self.binary_op(other, BinaryOperation::NotEq);
+        eq.sum((0..self.order()).collect_vec(), false).to_vec()[0] == 0.0
     }
 
     // returns that the inner content of the tensor is contiguous.
@@ -105,86 +112,69 @@ impl Tensor {
             .is_sorted_by(|&a, &b| Some(b.cmp(a)))
     }
 
-    // constructors
-    pub fn from_slice<S>(shape: S, slice: &[f32]) -> Self
-    where
-        S: ToShape,
-    {
-        Tensor::from_vec(shape, slice.to_vec())
-    }
+    ///////////////// constructors /////////////////
 
-    pub fn from_vec<S>(shape: S, v: Vec<f32>) -> Self
+    fn uninit<S>(shape: S, backend: &dyn Backend) -> Self
     where
         S: ToShape,
     {
-        // materialization of shape
-        let shape = shape.to_shape(v.len());
+        let shape = shape.to_shape(0);
         let strides = Shape::default_strides(shape);
 
         Tensor {
             shape,
             strides,
             offset: 0,
-            arr: Rc::new(UnsafeCell::new(v)),
+            buffer: Rc::new(backend.alloc_mem(shape.size())),
+        }
+    }
+
+    pub fn from_iter<S, I>(shape: S, data: I, backend: &dyn Backend) -> Self
+    where
+        S: ToShape,
+        I: ExactSizeIterator<Item = f32>,
+    {
+        let shape = shape.to_shape(data.len());
+        let strides = Shape::default_strides(shape);
+
+        Tensor {
+            shape,
+            strides,
+            offset: 0,
+            buffer: Rc::new(backend.alloc_mem_from_iter(data)),
         }
     }
 
     // Create tensor from single element
-    pub fn from_elem<S>(shape: S, elem: f32) -> Self
+    pub fn from_elem<S>(shape: S, elem: f32, backend: &dyn Backend) -> Self
     where
         S: ToShape,
     {
         let shape = shape.to_shape(0);
-        let v = vec![elem; shape.size()];
-        Tensor::from_vec(shape, v)
+        let iter = (0..shape.size()).map(|_| elem);
+
+        Tensor::from_iter(shape, iter, backend)
     }
 
     // Create tensor from the given distribution
-    pub fn from_dist<S, T>(shape: S, dist: T) -> Tensor
+    pub fn from_dist<S, D>(shape: S, dist: D, backend: &dyn Backend) -> Tensor
     where
         S: ToShape,
-        T: Distribution<f32>,
+        D: Distribution<f32>,
     {
         let shape = shape.to_shape(0);
 
-        let mut v = Vec::<f32>::with_capacity(shape.size());
-        let mut rng = thread_rng(); //&mut SmallRng::from_rng(thread_rng()).unwrap();
+        let mut rng = thread_rng();
+        let iter = (0..shape.size()).map(|_| dist.sample(&mut rng));
 
-        for _ in 0..shape.size() {
-            v.push(dist.sample(&mut rng));
-        }
-
-        Tensor::from_vec(shape, v)
+        Tensor::from_iter(shape, iter, backend)
     }
 
-    // private
-    fn from_ndarray(ndarray: ndarray::ArrayD<f32>) -> Self {
-        let shape = ndarray.shape().to_shape(0);
-        let strides = ndarray
-            .strides()
-            .iter()
-            .map(|x| *x as usize)
-            .collect::<Vec<usize>>();
-
-        let vec = ndarray.into_raw_vec();
-
-        // gather ndarray strides and apply those strides to resulting tensor
-        let mut t = Tensor::from_vec(shape, vec);
-        t.strides = strides;
-
-        t
+    pub fn scalar(v: f32, backend: &dyn Backend) -> Self {
+        Tensor::from_elem([1], v, backend)
     }
 
-    pub fn scalar(v: f32) -> Self {
-        Tensor::from_elem([1], v)
-    }
-
-    // only for the debugging
-    pub fn null() -> Self {
-        Tensor::scalar(0.0)
-    }
-
-    fn view<S>(orig: &Tensor, shape: S, strides: &[usize], offset: usize) -> Tensor
+    fn view<S>(source: &Tensor, shape: S, strides: &[usize], offset: usize) -> Tensor
     where
         S: ToShape,
     {
@@ -192,84 +182,56 @@ impl Tensor {
             shape: shape.to_shape(0), // no check
             strides: strides.to_vec(),
             offset,
-            arr: orig.arr.clone(), // this increases reference counter (do not copy actual data)
-        }
-    }
-
-    ////////////////// ndarray view converter (private) ////////////////
-
-    fn to_ndarray(&self) -> ndarray::ArrayViewD<f32> {
-        unsafe {
-            // let inner = self.arr.get().as_ref().unwrap();
-
-            let mut raw_ptr = self.arr().as_ptr();
-            // calculate offset
-            raw_ptr = raw_ptr.add(self.offset);
-
-            let shape = ndarray::IxDyn(self.shape.sizes()).strides(ndarray::IxDyn(self.strides()));
-
-            ndarray::ArrayViewD::from_shape_ptr(shape, raw_ptr)
-        }
-    }
-
-    ////////////////////// optimizers //////////////////////
-
-    fn shrink_if_possible(&self) {
-        if Rc::strong_count(&self.arr) == 1 {
-            // for cases where actual_size < current_size (i.e., broadcast), we does nothing special.
-            if self.mem_size() > self.size() {
-                self.standalone();
-            }
-        }
-    }
-
-    pub fn standalone(&self) {
-        let owned = self.to_ndarray().to_owned();
-        let new_v = owned.into_raw_vec();
-        unsafe {
-            *self.arr.get() = new_v;
+            buffer: source.buffer.clone(), // this increases reference counter (do not copy actual data)
         }
     }
 
     ///////////////// init constructors /////////////////
 
-    pub fn zeros<S>(shape: S) -> Tensor
+    pub fn zeros<S>(shape: S, backend: &dyn Backend) -> Tensor
     where
         S: ToShape,
     {
-        Tensor::from_elem(shape, 0.0)
+        Tensor::from_elem(shape, 0.0, backend)
     }
 
-    pub fn ones<S>(shape: S) -> Tensor
+    pub fn ones<S>(shape: S, backend: &dyn Backend) -> Tensor
     where
         S: ToShape,
     {
-        Tensor::from_elem(shape, 1.0)
+        Tensor::from_elem(shape, 1.0, backend)
     }
 
     // sample from standard normal dist
-    pub fn randn<S>(shape: S) -> Tensor
+    pub fn randn<S>(shape: S, backend: &dyn Backend) -> Tensor
     where
         S: ToShape,
     {
-        Tensor::from_dist(shape, Normal::new(0.0, 1.0).unwrap())
+        Tensor::from_dist(shape, Normal::new(0.0, 1.0).unwrap(), backend)
     }
+
+    ////////////////////// optimizers //////////////////////
+
+    // fn shrink_if_possible(&self) {
+    //     if Rc::strong_count(&self.arr) == 1 {
+    //         // for cases where actual_size < current_size (i.e., broadcast), we does nothing special.
+    //         if self.mem_size() > self.size() {
+    //             self.standalone();
+    //         }
+    //     }
+    // }
+    //
+    // pub fn standalone(&self) {
+    //     let owned = self.to_ndarray().to_owned();
+    //     let new_v = owned.into_raw_vec();
+    //     unsafe {
+    //         *self.arr.get() = new_v;
+    //     }
+    // }
+
+    //////////////////////////////////////////////////////////////
 
     ///////////////// comparison /////////////////
-    pub fn equals(&self, tensor: &Tensor, eps: f32) -> bool {
-        let eq_map = self
-            .zip_map(
-                tensor,
-                |&a, &b| if (a - b).abs() <= eps { 0 } else { 1 } as f32,
-            )
-            .unwrap();
-
-        eq_map.is_zero()
-    }
-
-    pub fn is_zero(&self) -> bool {
-        self.logical_iter().all(|&x| x == 0.0)
-    }
 
     ///////////////// index, slice, join /////////////////
 
@@ -279,119 +241,8 @@ impl Tensor {
     where
         I: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
         AlongAxisIter::new(self, axis)
-    }
-
-    pub fn fold_axis<I, F>(&self, axis: I, init: f32, mut fold: F) -> Tensor
-    where
-        I: ToIndex,
-        F: FnMut(&f32, &f32) -> f32,
-    {
-        let axis_u = axis.to_index(self.rank());
-
-        let mut folded_shape = self.shape;
-        folded_shape.remove(axis_u);
-        let folded = Tensor::from_elem(folded_shape, init);
-
-        for t in self.along_axis(axis) {
-            // wow!
-            folded
-                .random_iter_mut()
-                .zip(t.logical_iter())
-                .for_each(|(x, y)| {
-                    *x = fold(x, y);
-                })
-        }
-        folded
-    }
-
-    ////////////// modifier /////////////////
-
-    // preserve original memory layout??
-    pub fn map<F>(&self, f: F) -> Tensor
-    where
-        F: Fn(&f32) -> f32,
-    {
-        let v =
-            // fast, contiguous iter
-            if self.is_bijective() && self.is_contiguous() {
-                unsafe {
-                    let offset_ptr = self.arr().as_ptr().add(self.offset);
-                    let s = slice::from_raw_parts(offset_ptr, self.size());
-                    s.iter().map(f).collect::<Vec<f32>>()
-                }
-            }
-            // non-bijective tensors have to use random_iter (with current strides)
-            // or logical_iter (with default strides)
-            else {
-                self.logical_iter().map(f).collect::<Vec<f32>>()
-                // ^--- allows new tensor initialized with default strides
-            };
-
-        Tensor::from_vec(self.shape(), v)
-    }
-
-    pub fn mapv_inplace<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&f32) -> f32,
-    {
-        if self.is_contiguous() {
-            unsafe {
-                let offset_ptr = self.arr_mut().as_mut_ptr().add(self.offset);
-                let s = slice::from_raw_parts_mut(offset_ptr, self.size());
-                s.iter_mut().for_each(|x| *x = f(x));
-            }
-        }
-        // order does not matter..  every element is only visited once.
-        else {
-            self.random_iter_mut().for_each(|x| *x = f(x));
-        }
-    }
-
-    // visits each elements in a logical order.
-    // used for pairwise tensor operations.
-    pub fn logical_iter(&self) -> Iter {
-        Iter::new(
-            self.arr().as_ptr(),
-            self.offset,
-            self.shape.sizes(),
-            self.strides(),
-        )
-    }
-
-    // Visits inner elements in an arbitrary order, but faster than logical iterator
-    // because it visits elements in a way that cpu cache is utilized.
-    pub fn random_iter_mut(&self) -> IterMut {
-        let (strides, dim): (Vec<usize>, Vec<usize>) = self
-            .strides
-            .iter()
-            .zip(self.shape.iter())
-            .filter(|(&s, _)| s > 0)
-            .sorted_by(|(&s1, _), (&s2, _)| s2.cmp(&s1))
-            .unzip();
-
-        IterMut::new(self.arr_mut().as_mut_ptr(), self.offset, &dim, &strides)
-    }
-
-    pub fn zip_map<F>(&self, other: &Tensor, f: F) -> Result<Tensor, ShapeError>
-    where
-        F: Fn(&f32, &f32) -> f32,
-    {
-        if let Ok(u) = Shape::union(self.shape, other.shape) {
-            let a = self.upcast(&u).unwrap();
-            let b = other.upcast(&u).unwrap();
-
-            let v = a
-                .logical_iter()
-                .zip(b.logical_iter())
-                .map(|(a, b)| f(a, b))
-                .collect::<Vec<f32>>();
-
-            Ok(Tensor::from_vec(u, v))
-        } else {
-            Err(ShapeError::new("cannot broadcast!"))
-        }
     }
 }
 
@@ -405,16 +256,13 @@ impl PartialEq for Tensor {
         }
 
         // check inner contents
-        self.logical_iter()
-            .zip(other.logical_iter())
-            .all(|(a, b)| a == b)
+        self.equals(other)
     }
 }
 
 impl Clone for Tensor {
     fn clone(&self) -> Self {
-        let v = self.logical_iter().copied().collect::<Vec<f32>>();
-        Tensor::from_vec(self.shape(), v)
+        self.recreate()
     }
 }
 
@@ -513,8 +361,8 @@ mod tests {
 
     #[test]
     fn test_rank() {
-        assert_eq!(Tensor::zeros([]).rank(), 0);
-        assert_eq!(Tensor::zeros([1, 1, 4, 10]).rank(), 4);
+        assert_eq!(Tensor::zeros([]).order(), 0);
+        assert_eq!(Tensor::zeros([1, 1, 4, 10]).order(), 4);
     }
 
     #[test]
@@ -564,7 +412,7 @@ mod tests {
         let a = Tensor::ones([3, 2, 5]);
         let b = Tensor::ones([3, 2, 5]);
         assert_eq!(
-            Tensor::cat(&[&a, &b], 2).unwrap().shape(),
+            Tensor::concat(&[&a, &b], 2).unwrap().shape(),
             [3, 2, 10].to_shape(0)
         );
     }
@@ -582,24 +430,24 @@ mod tests {
     #[test]
     fn test_squeeze() {
         let a = Tensor::ones([1, 3, 2, 1]);
-        assert_eq!(a.squeeze(-1).shape(), [1, 3, 2].to_shape(0));
-        assert_eq!(a.squeeze(0).shape(), [3, 2, 1].to_shape(0));
+        assert_eq!(a.squeeze_axis(-1).shape(), [1, 3, 2].to_shape(0));
+        assert_eq!(a.squeeze_axis(0).shape(), [3, 2, 1].to_shape(0));
     }
 
     #[test]
     #[should_panic]
     fn test_squeeze_panic() {
         let a = Tensor::ones([1, 3, 2, 1]);
-        a.squeeze(2);
+        a.squeeze_axis(2);
     }
 
     #[test]
     fn test_expand_dims() {
         let a = Tensor::ones([3, 2, 9]);
-        assert_eq!(a.expand_dims(3).shape(), [3, 2, 9, 1].to_shape(0));
-        assert_eq!(a.expand_dims(-1).shape(), [3, 2, 9, 1].to_shape(0));
-        assert_eq!(a.expand_dims(0).shape(), [1, 3, 2, 9].to_shape(0));
-        assert_eq!(a.expand_dims(1).shape(), [3, 1, 2, 9].to_shape(0));
+        assert_eq!(a.expand_axis(3).shape(), [3, 2, 9, 1].to_shape(0));
+        assert_eq!(a.expand_axis(-1).shape(), [3, 2, 9, 1].to_shape(0));
+        assert_eq!(a.expand_axis(0).shape(), [1, 3, 2, 9].to_shape(0));
+        assert_eq!(a.expand_axis(1).shape(), [3, 1, 2, 9].to_shape(0));
     }
 
     #[test]

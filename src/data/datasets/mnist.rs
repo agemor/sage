@@ -79,9 +79,9 @@ impl Mnist {
             label_batch.extend(one_hot);
         }
 
-        let image_tensor = Tensor::from_vec([items.len(), Mnist::IMAGE_SIZE], image_batch);
+        let image_tensor = Tensor::from_iter([items.len(), Mnist::IMAGE_SIZE], image_batch);
 
-        let label_tensor = Tensor::from_vec([items.len(), 10], label_batch);
+        let label_tensor = Tensor::from_iter([items.len(), 10], label_batch);
 
         Some((image_tensor, label_tensor))
     }

@@ -1,0 +1,1 @@
+static BINARY_OPS_ADD: [i32; 3] = [1, 2, 3,];

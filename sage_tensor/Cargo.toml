@@ -1,19 +1,22 @@
 [package]
-name = "delta"
+name = "sage_tensor"
 version = "0.1.0"
-authors = ["hyunj"]
+authors = ["hyunjk"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-impl_ops = "0.1.1"
+rayon = "1.5.0"
 itertools = "0.10.0"
+num-traits = "0.2"
+num-integer = "0.1"
+num-complex = "0.4.0"
+ndarray = "0.15.1"
+arrayvec = "0.7.0"
 rand = "0.8.3"
 rand_distr = "0.4.0"
-num-traits = "0.2.14"
-ndarray = "0.14.0"
-matrixmultiply = "0.3.0"
+anyhow = "1.0"
+thiserror = "1.0"
 vulkano = "0.21"
 vulkano-shaders = "0.21"
-rayon = "1.5.0"

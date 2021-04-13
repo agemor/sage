@@ -13,6 +13,11 @@
 #[macro_use]
 extern crate impl_ops;
 
+#[macro_use]
+extern crate vulkano;
+extern crate vulkano_shaders;
+
+
 use crate::autodiff::ops::loss::softmax_cross_entropy;
 use crate::autodiff::var::Var;
 use crate::autodiff::{diff, diff_eval};

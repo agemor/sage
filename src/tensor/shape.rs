@@ -156,6 +156,15 @@ impl Shape {
         self
     }
 
+    pub fn inserted<I>(&self, axis: I, size: usize) -> Self
+    where
+        I: ToIndex,
+    {
+        let mut cloned = self.clone();
+        cloned.insert(axis, size);
+        cloned
+    }
+
     pub fn remove<I>(&mut self, axis: I) -> &mut Self
     where
         I: ToIndex,
@@ -169,6 +178,15 @@ impl Shape {
         }
         self.len -= 1;
         self
+    }
+
+    pub fn removed<I>(&self, axis: I) -> Self
+    where
+        I: ToIndex,
+    {
+        let mut cloned = self.clone();
+        cloned.remove(axis);
+        cloned
     }
 
     pub fn swap<I, J>(&mut self, axis_a: I, axis_b: J) -> &mut Self
@@ -193,6 +211,15 @@ impl Shape {
         }
         self.sizes[axis] = size;
         self
+    }
+
+    pub fn replaced<I>(&self, axis: I, size: usize) -> Self
+    where
+        I: ToIndex,
+    {
+        let mut cloned = self.clone();
+        cloned.replace(axis, size);
+        cloned
     }
 
     pub fn split<I>(&self, axis: I) -> (Shape, Shape)

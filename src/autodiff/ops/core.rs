@@ -867,7 +867,7 @@ impl Operator<2> for Concat {
         let x0 = x[0];
         let x1 = x[1];
 
-        Tensor::cat(&[x0, x1], self.axis).unwrap()
+        Tensor::concat(&[x0, x1], self.axis).unwrap()
     }
 
     fn debug_info(&self, x: [&Var; 2], y: &Var, profiler: &Profiler) -> DebugInfo {

@@ -1,84 +1,172 @@
+use crate::tensor::backend::{BinaryIndexOperation, BinaryOperation, UnaryOperation};
 use crate::tensor::shape::{Shape, ShapeError, ToIndex, ToIndices, ToShape};
 use crate::tensor::Tensor;
 use itertools::Itertools;
-use num_traits::FromPrimitive;
 use std::ops;
 
 impl Tensor {
-    // * Creates new tensor
-    pub fn cat<I>(tensors: &[&Tensor], axis: I) -> Result<Tensor, ShapeError>
+    pub fn binary_op(&self, other: &Tensor, op: BinaryOperation) -> Tensor {
+        let union_shape = Shape::union(self.shape, other.shape).expect("cannot broadcast");
+
+        let input1 = self.upcast(&union_shape).unwrap();
+        let input2 = other.upcast(&union_shape).unwrap();
+        let mut output = Tensor::uninit(union_shape, self.backend().clone());
+
+        self.backend().binary_op(&input1, &input2, &mut output, op);
+
+        output
+    }
+
+    pub fn unary_op(&self, op: UnaryOperation) -> Tensor {
+        let mut output = Tensor::uninit(self.shape, self.backend());
+        self.backend().unary_op(self, &mut output, op);
+        output
+    }
+
+    pub fn reduce<Is>(&self, op: BinaryOperation, axes: Is, retain_axis: bool) -> Tensor
     where
-        I: ToIndex,
+        Is: ToIndices,
     {
-        let axis = axis.to_index(tensors[0].rank());
+        let axes = axes.to_indices(self.shape.len());
 
-        // TODO: spit out some errors when tensors in different shape, except in the cat axis.
+        let reduced_shape = (0..self.order())
+            .filter(|a| !axes.contains(a))
+            .map(|e| self.shape[e])
+            .collect::<Vec<usize>>();
 
-        // convert into array views
-        let t_data = tensors
-            .iter()
-            .map(|t| t.to_ndarray())
-            .collect::<Vec<ndarray::ArrayViewD<f32>>>();
+        let mut output = Tensor::uninit(reduced_shape, self.backend().clone());
 
-        if let Ok(arr) = ndarray::concatenate(ndarray::Axis(axis), &t_data) {
-            Ok(Tensor::from_ndarray(arr))
+        self.backend().reduction(self, &mut output, op, axes);
+
+        if retain_axis {
+            let shape = axes.iter().fold(self.shape, |s, a| s.replaced(a, 1));
+            output.reshape(shape)
         } else {
-            Err(ShapeError::new("cannot concat!"))
+            output
         }
     }
 
-    // * Creates new tensor
-    pub fn stack<I>(tensors: &[&Tensor], axis: I) -> Result<Tensor, ShapeError>
+    pub fn reduce_index<I>(&self, op: BinaryIndexOperation, axis: I, retain_axis: bool) -> Tensor
     where
         I: ToIndex,
     {
-        if !tensors.iter().map(|e| e.shape).all_equal() {
+        let axis = axis.to_index(self.order());
+
+        let mut output = Tensor::uninit(self.shape.removed(axis), self.backend().clone());
+
+        self.backend().reduction_index(self, &mut output, op, axis);
+
+        if retain_axis {
+            output.expand_axis(axis)
+        } else {
+            output
+        }
+    }
+
+    pub fn contract<Is1, Is2>(&self, other: &Tensor, axes1: Is1, axes2: Is2) -> Tensor
+    where
+        Is1: ToIndices,
+        Is2: ToIndices,
+    {
+        let axes1 = axes1.to_indices(self.order());
+        let axes2 = axes2.to_indices(other.order());
+
+        let preserved_shape1 = (0..self.order())
+            .filter(|a| !axes1.contains(a))
+            .map(|e| self.shape[e]);
+
+        let preserved_shape2 = (0..other.order())
+            .filter(|a| !axes2.contains(a))
+            .map(|e| other.shape[e]);
+
+        let contracted_shape = preserved_shape1
+            .chain(preserved_shape2)
+            .collect::<Vec<usize>>();
+
+        let mut output = Tensor::uninit(contracted_shape, self.backend().clone());
+
+        self.backend()
+            .contraction(self, other, &mut output, axes1, axes2);
+
+        output
+    }
+
+    // * Creates new tensor
+    pub fn concat<I>(inputs: &[&Tensor], axis: I) -> Tensor
+    where
+        I: ToIndex,
+    {
+        let inputs_first = inputs[0];
+
+        let axis = axis.to_index(inputs_first.order());
+
+        if !inputs.iter().map(|t| t.shape.removed(axis)).all_equal() {
+            panic!("shape does not match");
+        }
+
+        let concat_extent = inputs.iter().map(|t| t.shape[axis]).sum();
+        let concat_shape = inputs_first.shape.replaced(axis, concat_extent);
+
+        let mut output = Tensor::uninit(concat_shape, inputs_first.backend().clone());
+
+        inputs_first.backend().concat(inputs, &mut output, axis);
+
+        output
+    }
+
+    // * Creates new tensor
+    pub fn stack<I>(inputs: &[&Tensor], axis: I) -> Tensor
+    where
+        I: ToIndex,
+    {
+        if !inputs.iter().map(|t| t.extents()).all_equal() {
             panic!("all tensors should be in the same shape");
         }
+        let inputs_first = inputs[0];
 
-        let axis = axis.to_index(tensors[0].rank() + 1);
+        let axis = axis.to_index(inputs_first.order() + 1);
+
+        let stacked_shape = inputs_first.shape.inserted(axis, inputs.len());
 
         // convert into array views
-        let t_data = tensors
-            .iter()
-            .map(|t| t.to_ndarray())
-            .collect::<Vec<ndarray::ArrayViewD<f32>>>();
-        if let Ok(arr) = ndarray::stack(ndarray::Axis(axis), &t_data) {
-            Ok(Tensor::from_ndarray(arr))
-        } else {
-            Err(ShapeError::new("cannot stack!"))
-        }
+        let expanded_inputs = inputs.iter().map(|t| t.expand_axis(axis)).collect_vec();
+
+        Self::concat(expanded_inputs.iter().collect_vec().as_ref(), axis)
     }
 
-    pub fn squeeze<I>(&self, axis: I) -> Tensor
+    // create a new one, with default strides (= contiguous)
+    pub fn recreate(&self) -> Tensor {
+        let mut output = Tensor::uninit(self.shape, self.backend().clone());
+        self.backend().copy(self, &mut output);
+        output
+    }
+
+    pub fn squeeze_axis<I>(&self, axis: I) -> Tensor
     where
         I: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
 
-        let mut new_shape = self.shape;
-        let mut new_strides = self.strides.clone();
-
-        if new_shape[axis] == 1 {
-            new_shape.remove(axis);
-            new_strides.remove(axis);
-        } else {
+        if self.shape[axis] != 1 {
             panic!("dim=1 cannot be squeezed");
         }
+
+        let new_shape = self.shape.removed(axis);
+        let mut new_strides = self.strides.clone();
+        new_strides.remove(axis);
+
         Tensor::view(self, new_shape, &new_strides, self.offset)
     }
 
-    pub fn expand_dims<I>(&self, axis: I) -> Tensor
+    pub fn expand_axis<I>(&self, axis: I) -> Tensor
     where
         I: ToIndex,
     {
         // allow unexisting index
-        let axis = axis.to_index(self.rank() + 1);
+        let axis = axis.to_index(self.order() + 1);
 
-        let mut new_shape = self.shape;
+        let new_shape = self.shape.inserted(axis, 1);
         let mut new_strides = self.strides.clone();
-
-        new_shape.insert(axis, 1);
 
         if new_strides.len() == axis {
             new_strides.push(1);
@@ -91,7 +179,7 @@ impl Tensor {
     }
 
     // reshape (underlying data does not change)
-    pub fn reshape<S>(&self, shape: S) -> Result<Tensor, ShapeError>
+    pub fn reshape<S>(&self, shape: S) -> Tensor
     where
         S: ToShape,
     {
@@ -99,30 +187,30 @@ impl Tensor {
         let new_strides = Shape::default_strides(new_shape);
 
         if self.is_contiguous() {
-            Ok(Tensor::view(self, new_shape, &new_strides, self.offset))
+            Tensor::view(self, new_shape, &new_strides, self.offset)
         } else {
-            Err(ShapeError::new("tensor not contiguous"))
+            Tensor::view(&self.recreate(), new_shape, &new_strides, 0)
         }
     }
 
     // swap last two dims of tensor
-    pub fn transpose<I, J>(&self, axis_a: I, axis_b: J) -> Tensor
+    pub fn transpose<I1, I2>(&self, axis1: I1, axis2: I2) -> Tensor
     where
-        I: ToIndex,
-        J: ToIndex,
+        I1: ToIndex,
+        I2: ToIndex,
     {
-        let axis_a = axis_a.to_index(self.rank());
-        let axis_b = axis_b.to_index(self.rank());
+        let axis1 = axis1.to_index(self.order());
+        let axis2 = axis2.to_index(self.order());
 
-        if axis_a == axis_b {
+        if axis1 == axis2 {
             panic!("same axis");
         }
 
         let mut new_shape = self.shape;
         let mut new_strides = self.strides.clone();
 
-        new_shape.swap(axis_a, axis_b);
-        new_strides.swap(axis_a, axis_b);
+        new_shape.swap(axis1, axis2);
+        new_strides.swap(axis1, axis2);
 
         Tensor::view(self, new_shape, &new_strides, self.offset)
     }
@@ -131,9 +219,9 @@ impl Tensor {
     where
         Is: ToIndices,
     {
-        let axes = axes.to_indices(self.rank());
+        let axes = axes.to_indices(self.order());
 
-        let mut use_counts = vec![0; self.rank()];
+        let mut use_counts = vec![0; self.order()];
 
         axes.iter().for_each(|axis| {
             use_counts[*axis] += 1;
@@ -160,7 +248,7 @@ impl Tensor {
     {
         let target_shape = shape.to_shape(0);
 
-        if self.rank() > target_shape.len() {
+        if self.order() > target_shape.len() {
             return Err(ShapeError::new("invalid broadcast.. too small shape"));
         }
 
@@ -228,7 +316,7 @@ impl Tensor {
         I: ToIndex,
         J: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
         let index = index.to_index(self.shape[axis]);
 
         // a = (10, 10, 10)
@@ -270,7 +358,7 @@ impl Tensor {
         J: ToIndex,
         K: ToIndex,
     {
-        let axis = axis.to_index(self.rank());
+        let axis = axis.to_index(self.order());
 
         let start_index = start_index.to_index(self.shape[axis]);
         let end_index = end_index.to_index(self.shape[axis]);
@@ -310,61 +398,27 @@ impl Tensor {
     {
         self.slice_axis(start_index, end_index, 0)
     }
-
-    pub fn sum(&self) -> f32 {
-        self.logical_iter().sum()
-    }
-
-    pub fn sum_axis<I>(&self, axis: I, retain_axis: bool) -> Tensor
-    where
-        I: ToIndex,
-    {
-        let axis = axis.to_index(self.rank());
-
-        let mut new_shape = self.shape;
-        new_shape.remove(axis);
-
-        let mut summed = Tensor::zeros(new_shape);
-
-        for t in self.along_axis(axis) {
-            summed = summed + t;
-        }
-
-        if retain_axis {
-            summed.expand_dims(axis)
-        } else {
-            summed
-        }
-    }
 }
 
 // math utility methods
 pub fn add(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a + b).unwrap()
+    a.binary_op(b, BinaryOperation::Add)
 }
 
 pub fn sub(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a - b).unwrap()
+    a.binary_op(b, BinaryOperation::Sub)
 }
 
 pub fn mul(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a * b).unwrap()
+    a.binary_op(b, BinaryOperation::Mul)
 }
 
 pub fn div(a: &Tensor, b: &Tensor) -> Tensor {
-    a.zip_map(b, |&a, &b| a / b).unwrap()
+    a.binary_op(b, BinaryOperation::Div)
 }
 
 pub fn neg(a: &Tensor) -> Tensor {
-    a.map(|&a| -a)
-}
-
-pub fn inplace_exp(t: &mut Tensor) {
-    t.mapv_inplace(|x| x.exp());
-}
-
-pub fn inplace_ln(t: &mut Tensor) {
-    t.mapv_inplace(|x| x.ln());
+    a.unary_op(UnaryOperation::Neg)
 }
 
 macro_rules! impl_tensor_op {
